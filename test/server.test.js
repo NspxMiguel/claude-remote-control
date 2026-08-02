@@ -419,6 +419,120 @@ describe('websocket', () => {
     await get(`/api/sessions/${session.id}`, config.token, { method: 'DELETE' });
   });
 
+  test('two devices see the same session, and one answer settles a permission for both', async () => {
+    const { session } = await (
+      await get('/api/sessions', config.token, { method: 'POST', body: JSON.stringify({ cwd: WORK }) })
+    ).json();
+
+    const open = async () => {
+      const ws = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${encodeURIComponent(config.token)}`);
+      await new Promise((resolve) => ws.on('open', resolve));
+      ws.send(JSON.stringify({ t: 'subscribe', sessionId: session.id, since: 0 }));
+      return ws;
+    };
+
+    const phone = await open();
+    const laptop = await open();
+
+    const asked = { phone: null, laptop: null };
+    const resolved = { phone: false, laptop: false };
+    const results = { phone: false, laptop: false };
+
+    const track = (ws, who) =>
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.t === 'permission') asked[who] = msg.payload;
+        if (msg.t === 'permissionResolved') resolved[who] = true;
+        if (msg.t === 'patch' && msg.item?.kind === 'result') results[who] = true;
+      });
+    track(phone, 'phone');
+    track(laptop, 'laptop');
+
+    for (let i = 0; i < 60; i++) {
+      const state = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+      if (state.state.status === 'idle') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    phone.send(JSON.stringify({ t: 'prompt', sessionId: session.id, text: 'two-devices' }));
+
+    // Both devices are asked.
+    for (let i = 0; i < 100 && !(asked.phone && asked.laptop); i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(asked.phone && asked.laptop, 'both devices got the permission request');
+    assert.equal(asked.phone.requestId, asked.laptop.requestId);
+
+    // Only the laptop answers.
+    laptop.send(
+      JSON.stringify({ t: 'permission', sessionId: session.id, requestId: asked.laptop.requestId, decision: 'allow' }),
+    );
+
+    for (let i = 0; i < 100 && !(results.phone && results.laptop); i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(resolved.phone, 'the phone was told the request is settled');
+    assert.ok(results.phone && results.laptop, 'both devices saw the turn finish');
+
+    phone.close();
+    laptop.close();
+    await get(`/api/sessions/${session.id}`, config.token, { method: 'DELETE' });
+  });
+
+  test('reconnecting with since= returns only what was missed', async () => {
+    const { session } = await (
+      await get('/api/sessions', config.token, { method: 'POST', body: JSON.stringify({ cwd: WORK }) })
+    ).json();
+
+    for (let i = 0; i < 60; i++) {
+      const state = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+      if (state.state.status === 'idle') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    const first = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+    const mark = Math.max(...first.items.map((i) => i.seq));
+
+    const ws = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${encodeURIComponent(config.token)}`);
+    await new Promise((resolve) => ws.on('open', resolve));
+    ws.send(JSON.stringify({ t: 'subscribe', sessionId: session.id, since: 0 }));
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.t === 'permission') {
+        ws.send(
+          JSON.stringify({
+            t: 'permission',
+            sessionId: session.id,
+            requestId: msg.payload.requestId,
+            decision: 'allow',
+          }),
+        );
+      }
+    });
+    ws.send(JSON.stringify({ t: 'prompt', sessionId: session.id, text: 'catch-up' }));
+
+    for (let i = 0; i < 200; i++) {
+      const state = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+      if (state.items.some((it) => it.kind === 'result')) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    const delta = await (await get(`/api/sessions/${session.id}/feed?since=${mark}`)).json();
+    const full = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+
+    assert.ok(delta.items.length > 0, 'the catch-up is not empty');
+    assert.ok(delta.items.length < full.items.length, 'the catch-up is smaller than a full replay');
+    assert.ok(delta.items.every((i) => i.seq > mark), 'nothing already seen is resent');
+    assert.deepEqual(
+      delta.items.map((i) => i.ord),
+      [...delta.items.map((i) => i.ord)].sort((a, b) => a - b),
+      'the catch-up is still in order',
+    );
+
+    ws.close();
+    await get(`/api/sessions/${session.id}`, config.token, { method: 'DELETE' });
+  });
+
   test('prompting a mirror reports an error instead of crashing', async () => {
     const ws = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${encodeURIComponent(config.token)}`);
     await new Promise((resolve) => ws.on('open', resolve));
