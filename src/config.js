@@ -7,6 +7,17 @@ export const CONFIG_DIR =
   process.env.CRC_CONFIG_DIR || path.join(os.homedir(), '.claude-remote-control');
 export const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
+/**
+ * The permission modes a session can be in. Anything else is refused rather
+ * than passed to an agent that would interpret an unknown mode its own way —
+ * usually by asking for everything, which is the opposite of what someone
+ * typing a mode name is after.
+ */
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+
+/** The mode that answers every prompt itself, so nothing reaches your phone. */
+export const BYPASS_MODE = 'bypassPermissions';
+
 const DEFAULTS = {
   /** Port the daemon listens on. */
   port: 8787,

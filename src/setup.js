@@ -209,19 +209,44 @@ class KeepAwake {
 export const keepAwake = new KeepAwake();
 
 const PMSET = '/usr/bin/pmset';
+/** How often to re-check the power source while closed-lid mode is armed. */
+const POWER_POLL_MS = 30_000;
+
+/** True when the Mac is running off the wall rather than the battery. */
+async function onACPower() {
+  try {
+    const { stdout } = await exec(`${PMSET} -g ps`, { env: shellEnv(), timeout: 5000 });
+    // "Now drawing from 'AC Power'" — a desktop Mac reports AC and no battery.
+    return /drawing from ['"]?AC Power/i.test(stdout);
+  } catch {
+    // Unknown power source: assume battery, which is the side that lets the Mac
+    // sleep. Guessing the other way can cook a laptop in a bag.
+    return false;
+  }
+}
 
 /**
  * Keeping the Mac awake with the lid shut.
  *
  * `caffeinate` does not cover this: closing the lid is its own event, and only
- * `pmset -c disablesleep` suppresses it. That needs root, which is why this is
- * a separate switch — scripts/allow-lid-control.sh grants exactly the two
- * commands below, once, and then it can be toggled from anywhere.
+ * `pmset disablesleep` suppresses it. That needs root, which is why this is a
+ * separate switch — scripts/allow-lid-control.sh grants exactly two commands,
+ * once, and then it can be toggled from anywhere.
+ *
+ * SleepDisabled is one global flag, not a per-power-source setting: it never
+ * appears under "AC Power" or "Battery Power" in `pmset -g custom`, and Power
+ * Protect for Amphetamine — the one thing known to work here — sets it with
+ * `-a`. So "only while plugged in" cannot be delegated to pmset; this watches
+ * the power source and clears the flag itself the moment the plug comes out.
  */
 export const closedLid = {
+  /** What the user asked for, as opposed to what is in force right now. */
+  wanted: false,
+  timer: null,
+
   async state() {
     if (process.platform !== 'darwin') {
-      return { supported: false, active: false, permitted: false };
+      return { supported: false, active: false, wanted: false, permitted: false };
     }
 
     let active = false;
@@ -236,7 +261,7 @@ export const closedLid = {
     // "may I?" without hanging on a password nobody is there to type.
     let permitted = false;
     try {
-      await exec(`sudo -n ${PMSET} -c disablesleep ${active ? 1 : 0}`, {
+      await exec(`sudo -n ${PMSET} -a disablesleep ${active ? 1 : 0}`, {
         env: shellEnv(),
         timeout: 5000,
       });
@@ -245,22 +270,30 @@ export const closedLid = {
       permitted = false;
     }
 
+    const onAC = await onACPower();
     return {
       supported: true,
       active,
+      wanted: this.wanted,
       permitted,
+      onAC,
       description:
-        'Keeps the Mac running with the lid closed while it is plugged in. On battery it sleeps as usual.',
+        'Keeps the Mac running with the lid closed while it is plugged in. Unplug it and the ' +
+        'Mac sleeps on the next check, so it never stays awake in a bag.',
+      status: !this.wanted
+        ? 'off'
+        : onAC
+          ? 'on — the lid can stay closed'
+          : 'waiting for mains — on battery the Mac sleeps as usual',
       setupCommand: LID_SETUP_COMMAND,
     };
   },
 
-  async set(enabled) {
-    if (process.platform !== 'darwin') {
-      throw Object.assign(new Error('Closed-lid mode is macOS-only.'), { status: 400 });
-    }
+  /** Push the flag to whatever the current intent and power source imply. */
+  async apply() {
+    const target = this.wanted && (await onACPower());
     try {
-      await exec(`sudo -n ${PMSET} -c disablesleep ${enabled ? 1 : 0}`, {
+      await exec(`sudo -n ${PMSET} -a disablesleep ${target ? 1 : 0}`, {
         env: shellEnv(),
         timeout: 8000,
       });
@@ -270,8 +303,52 @@ export const closedLid = {
         { status: 403 },
       );
     }
-    log.info(`closed-lid mode ${enabled ? 'on' : 'off'}`);
+    return target;
+  },
+
+  async set(enabled) {
+    if (process.platform !== 'darwin') {
+      throw Object.assign(new Error('Closed-lid mode is macOS-only.'), { status: 400 });
+    }
+    const previous = this.wanted;
+    this.wanted = Boolean(enabled);
+    try {
+      const inForce = await this.apply();
+      log.info(`closed-lid mode ${this.wanted ? 'armed' : 'off'}${inForce ? ' (in force)' : ''}`);
+    } catch (err) {
+      this.wanted = previous; // the switch stays where it was if pmset refused
+      throw err;
+    }
+
+    // Only poll while armed — an idle daemon should not be running pmset every
+    // 30 seconds for the rest of the day.
+    clearInterval(this.timer);
+    this.timer = null;
+    if (this.wanted) {
+      this.timer = setInterval(() => {
+        this.apply().catch((err) => log.warn(`closed-lid re-check failed: ${err?.message}`));
+      }, POWER_POLL_MS);
+      this.timer.unref?.();
+    }
+
     return this.state();
+  },
+
+  /**
+   * Give the setting back on the way out. A daemon that exits holding it would
+   * leave a Mac that never sleeps, with nothing left running to explain why.
+   */
+  async shutdown() {
+    clearInterval(this.timer);
+    this.timer = null;
+    if (!this.wanted) return false;
+    this.wanted = false;
+    try {
+      await exec(`sudo -n ${PMSET} -a disablesleep 0`, { env: shellEnv(), timeout: 5000 });
+      return true;
+    } catch {
+      return false;
+    }
   },
 };
 

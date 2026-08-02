@@ -115,6 +115,44 @@ describe('session lifecycle', () => {
     await manager.close(session.id);
   });
 
+  test('bypass mode answers for you, so nothing is ever pushed to a phone', async () => {
+    const session = manager.create({ cwd: WORK, permissionMode: 'bypassPermissions' });
+    await waitFor(session, (s) => s.claudeSessionId, 'init');
+
+    let asked = 0;
+    session.on('permission', () => (asked += 1));
+
+    session.send('hello-world');
+    await waitFor(session, (s) => s.feed.items.some((i) => i.kind === 'result'), 'result');
+
+    assert.equal(asked, 0, 'no permission event was emitted');
+    assert.equal(session.feed.items.filter((i) => i.kind === 'permission').length, 0);
+    // The tool still ran: bypassing the question is not skipping the work.
+    const tool = session.feed.items.find((i) => i.kind === 'tool');
+    assert.equal(tool.status, 'done');
+    assert.equal(tool.result, 'hello-world');
+    await manager.close(session.id);
+  });
+
+  test('switching to bypass releases the prompt already on screen', async () => {
+    const session = manager.create({ cwd: WORK });
+    await waitFor(session, (s) => s.claudeSessionId, 'init');
+
+    session.send('hello-world');
+    await waitFor(session, (s) => s.pendingPermissions.size === 1, 'a pending permission');
+
+    await session.setPermissionMode('bypassPermissions');
+
+    assert.equal(session.pendingPermissions.size, 0, 'nothing is left waiting for an answer');
+    const permItem = session.feed.items.find((i) => i.kind === 'permission');
+    assert.equal(permItem.state, 'allowed');
+
+    // And the turn it was blocking runs to completion.
+    await waitFor(session, (s) => s.feed.items.some((i) => i.kind === 'result'), 'result');
+    assert.equal(session.feed.items.find((i) => i.kind === 'tool').status, 'done');
+    await manager.close(session.id);
+  });
+
   test('an unanswered permission is denied after the timeout', async () => {
     const session = manager.create({ cwd: WORK });
     await waitFor(session, (s) => s.claudeSessionId, 'init');

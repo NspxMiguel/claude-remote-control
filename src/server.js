@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
 import { Auth, clientIp, extractToken } from './auth.js';
-import { isPathAllowed, realPath, saveConfig } from './config.js';
+import { isPathAllowed, PERMISSION_MODES, realPath, saveConfig } from './config.js';
 import { SessionManager } from './agent/manager.js';
 import { MirrorStore } from './mirror/store.js';
 import { reachableUrls } from './net.js';
@@ -27,6 +27,23 @@ const MIME = {
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
 };
+
+/**
+ * Permission modes come from a phone, so they get checked here rather than
+ * trusted. An unrecognised mode reaching an agent is worse than a 400: most
+ * treat it as "ask about everything", which is precisely what someone setting
+ * a mode by hand is trying to get away from.
+ */
+function checkPermissionMode(mode) {
+  if (mode === undefined || mode === null) return undefined;
+  if (!PERMISSION_MODES.includes(mode)) {
+    throw Object.assign(
+      new Error(`Unknown permission mode: ${mode}. Use one of ${PERMISSION_MODES.join(', ')}.`),
+      { status: 400 },
+    );
+  }
+  return mode;
+}
 
 const json = (res, status, body) => {
   const payload = JSON.stringify(body);
@@ -98,6 +115,12 @@ export class RemoteControlServer {
 
   async close() {
     clearInterval(this.sweeper);
+    // Hand back the sleep settings we took. Closed-lid mode is a system-wide
+    // flag: left set by a daemon that is no longer running, it becomes a Mac
+    // that never sleeps and nothing on screen to say why.
+    const { closedLid, keepAwake } = await import('./setup.js');
+    await closedLid.shutdown();
+    keepAwake.disable();
     this.mirrors.closeAll();
     await this.sessions.closeAll();
     for (const ws of this.clients.keys()) ws.close(1001, 'Server shutting down');
@@ -362,7 +385,7 @@ export class RemoteControlServer {
       const session = this.sessions.create({
         cwd: body.cwd,
         model: body.model,
-        permissionMode: body.permissionMode,
+        permissionMode: checkPermissionMode(body.permissionMode),
         resumeFrom: body.resumeFrom,
         forkSession: body.forkSession !== false,
         title: body.title,
@@ -410,7 +433,7 @@ export class RemoteControlServer {
       }
       if (action === 'permission-mode' && method === 'POST') {
         const body = await readJsonBody(req);
-        await session.setPermissionMode(body.mode);
+        await session.setPermissionMode(checkPermissionMode(body.mode));
         json(res, 200, { session: session.toJSON() });
         return;
       }
@@ -585,11 +608,19 @@ export class RemoteControlServer {
 
     if (route === 'settings' && method === 'POST') {
       const body = await readJsonBody(req);
+      checkPermissionMode(body.defaultPermissionMode);
       for (const key of ['defaultCwd', 'defaultModel', 'defaultPermissionMode']) {
         if (body[key] !== undefined) this.config[key] = body[key];
       }
       saveConfig(this.config);
-      json(res, 200, { ok: true });
+
+      // A default that only applies to sessions you have not started yet is a
+      // strange kind of default when the point is to stop being interrupted.
+      let applied = 0;
+      if (body.applyToOpenSessions && body.defaultPermissionMode !== undefined) {
+        applied = await this.sessions.setPermissionModeAll(body.defaultPermissionMode);
+      }
+      json(res, 200, { ok: true, applied });
       return;
     }
 

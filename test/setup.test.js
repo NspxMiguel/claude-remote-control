@@ -82,6 +82,8 @@ describe('closed-lid mode', () => {
     // without hanging on a prompt nobody is there to answer.
     assert.equal(typeof state.active, 'boolean');
     assert.equal(typeof state.permitted, 'boolean');
+    assert.equal(typeof state.onAC, 'boolean');
+    assert.equal(state.wanted, false, 'nothing is armed until someone asks for it');
     assert.match(state.description, /lid closed/);
     assert.match(state.setupCommand, /allow-lid-control\.sh$/);
   });
@@ -90,6 +92,14 @@ describe('closed-lid mode', () => {
     const state = await closedLid.state();
     if (!state.supported || state.permitted) return; // already set up on this machine
     await assert.rejects(() => closedLid.set(true), /has not granted permission/);
+    // A refusal must not leave the switch looking on.
+    assert.equal(closedLid.wanted, false);
+    assert.equal(closedLid.timer, null, 'and must not leave a poller behind');
+  });
+
+  test('shutting down is safe whether or not it was ever armed', async () => {
+    assert.equal(await closedLid.shutdown(), false);
+    assert.equal(closedLid.timer, null);
   });
 
   test('the setup script exists and is executable', () => {
@@ -97,11 +107,31 @@ describe('closed-lid mode', () => {
     assert.ok(fs.existsSync(script));
     assert.doesNotThrow(() => fs.accessSync(script, fs.constants.X_OK));
 
-    // The rule it installs must not be able to run anything else.
+    // The rule it installs must not be able to run anything else. `-a` matches
+    // what the daemon runs; a rule for `-c` would never be used and the switch
+    // would ask for a password it cannot collect.
     const source = fs.readFileSync(script, 'utf8');
-    assert.match(source, /disablesleep 1, \$\{PMSET\} -c disablesleep 0/);
+    assert.match(source, /disablesleep 1, \$\{PMSET\} -a disablesleep 0/);
     assert.ok(!source.includes('ALL=(ALL)'), 'never grants blanket sudo');
     assert.match(source, /visudo -cf/, 'validates before installing');
+  });
+
+  test('the daemon runs exactly what the rule allows', async () => {
+    // The two have to agree literally: sudoers matches on the command line,
+    // so a stray flag anywhere means every toggle silently needs a password.
+    const script = fs.readFileSync(
+      fileURLToPath(new URL('../scripts/allow-lid-control.sh', import.meta.url)),
+      'utf8',
+    );
+    const daemon = fs.readFileSync(
+      fileURLToPath(new URL('../src/setup.js', import.meta.url)),
+      'utf8',
+    );
+    const granted = script.match(/\$\{PMSET\} (-\w disablesleep) 1/)?.[1];
+    assert.ok(granted, 'the script grants a pmset command');
+    for (const used of daemon.matchAll(/\$\{PMSET\} (-\w disablesleep)/g)) {
+      assert.equal(used[1], granted, 'every pmset call matches the granted form');
+    }
   });
 });
 

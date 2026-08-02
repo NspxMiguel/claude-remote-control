@@ -1051,13 +1051,15 @@ async function renderSetup() {
     head.appendChild(el('span', 'agent-name', 'Run with the lid closed'));
 
     if (data.closedLid.permitted) {
-      const toggle = el('button', 'link-btn', data.closedLid.active ? 'Turn off' : 'Turn on');
+      // `wanted` is the switch; `active` is whether it is in force right now,
+      // which on battery it deliberately is not.
+      const toggle = el('button', 'link-btn', data.closedLid.wanted ? 'Turn off' : 'Turn on');
       toggle.type = 'button';
       toggle.addEventListener('click', async () => {
         try {
           await api('/api/setup/closed-lid', {
             method: 'PUT',
-            body: JSON.stringify({ enabled: !data.closedLid.active }),
+            body: JSON.stringify({ enabled: !data.closedLid.wanted }),
           });
           renderSetup();
         } catch (err) {
@@ -1069,6 +1071,9 @@ async function renderSetup() {
       head.appendChild(el('span', 'agent-state', 'needs permission once'));
     }
     row.appendChild(head);
+    if (data.closedLid.permitted && data.closedLid.status) {
+      row.appendChild(el('p', 'small muted', data.closedLid.status));
+    }
     row.appendChild(el('p', 'small muted', data.closedLid.description));
 
     if (!data.closedLid.permitted) {
@@ -1127,6 +1132,64 @@ async function renderSetup() {
 
 const prettyPath = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~');
 
+const BYPASS_MODE = 'bypassPermissions';
+
+/**
+ * The one switch that stops every prompt. It is deliberately a switch and not
+ * another entry in the permission dropdown: picking a mode per session is not
+ * the same promise as "do not interrupt me", and the second is what people
+ * driving an agent from a phone actually want.
+ */
+function renderPermissions(defaults = {}) {
+  const container = $('#perms-body');
+  container.innerHTML = '';
+  const on = defaults.permissionMode === BYPASS_MODE;
+
+  container.appendChild(el('label', null, 'Permissions'));
+
+  const row = el('div', 'agent-row');
+  const head = el('div', 'agent-head');
+  head.appendChild(el('i', `dot ${on ? 'error' : 'idle'}`));
+  head.appendChild(el('span', 'agent-name', 'Never ask for permission'));
+
+  const toggle = el('button', 'link-btn', on ? 'Turn off' : 'Turn on');
+  toggle.type = 'button';
+  toggle.addEventListener('click', async () => {
+    toggle.disabled = true;
+    try {
+      const { applied } = await api('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          defaultPermissionMode: on ? 'default' : BYPASS_MODE,
+          applyToOpenSessions: true,
+        }),
+      });
+      state.serverState = await api('/api/state');
+      renderPermissions(state.serverState.defaults);
+      const scope = applied ? ` — ${applied} open session${applied === 1 ? '' : 's'} too` : '';
+      toast(on ? `Asking again${scope}` : `Nothing will ask${scope}`);
+    } catch (err) {
+      toast(err.message);
+      toggle.disabled = false;
+    }
+  });
+  head.appendChild(toggle);
+  row.appendChild(head);
+
+  row.appendChild(
+    el(
+      'p',
+      'small muted',
+      on
+        ? 'Every tool runs the moment the agent asks for it — edits, shell commands, ' +
+            'deletions, network calls. Nothing reaches this screen.'
+        : 'Runs every tool without asking, in this and every session. Convenient when ' +
+            'you are away from the Mac; there is nothing to catch a bad command.',
+    ),
+  );
+  container.appendChild(row);
+}
+
 async function openSettings() {
   const body = $('#settings-body');
   body.innerHTML = '';
@@ -1134,6 +1197,7 @@ async function openSettings() {
   try {
     const data = await api('/api/state');
     state.serverState = data;
+    renderPermissions(data.defaults);
 
     body.appendChild(el('label', null, 'Reachable at'));
 
@@ -1368,6 +1432,9 @@ function wireUp() {
   // New session
   $('#new-session').addEventListener('click', async () => {
     const start = state.serverState?.defaults?.cwd || '~';
+    // Otherwise the sheet quietly proposes "Ask me" to someone who set the
+    // default to never ask, and the setting looks broken on the next session.
+    $('#new-perm').value = state.serverState?.defaults?.permissionMode || 'default';
     $('#new-sheet').hidden = false;
     renderAgentPicker();
     try {

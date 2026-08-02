@@ -182,6 +182,17 @@ like an SSH key.
 | **Brute force is throttled** | Ten bad tokens from one address locks it out for five minutes. |
 | **You choose the permission mode** | `default` routes every prompt to your phone. `bypassPermissions` asks nothing — only use it somewhere you'd be comfortable running `rm -rf` unattended. |
 
+Per session that is a dropdown; for good, it is *Settings ▸ Permissions ▸ Never
+ask for permission*. That switch sets the default for new sessions **and**
+flips the ones already open, releasing any prompt currently on screen — a
+setting that only applied to sessions you had not started yet would be a strange
+kind of "stop asking me".
+
+It is enforced in the daemon rather than passed along to the agent, which
+matters because the agents disagree about permissions: Claude Code honours the
+mode itself, an ACP agent asks anyway, and Antigravity asks on the host where
+your phone cannot answer. One switch, one place, all three.
+
 There is **no TLS** unless you put Tailscale in front of it. Over a tailnet the
 tunnel is already encrypted end to end. On a home LAN, traffic is in the clear —
 fine for most people, not fine on coffee-shop Wi-Fi.
@@ -199,7 +210,7 @@ Two different things sleep a laptop, and they need two different answers.
 | | |
 |---|---|
 | **Idle sleep** | Nothing happening for a while. `caffeinate -s` prevents it, and only while plugged in — on battery the Mac still sleeps. No privileges needed, so *Keep this Mac awake* just works, and the process dies with the daemon so it cannot leave your Mac awake forever. |
-| **Lid sleep** | Closing the lid. `caffeinate` does not touch this; only `pmset -c disablesleep 1` does, and that needs root. This is exactly why Power Protect for Amphetamine ships a privileged helper. |
+| **Lid sleep** | Closing the lid. `caffeinate` does not touch this; only `pmset disablesleep 1` does, and that needs root. This is exactly why Power Protect for Amphetamine ships a privileged helper — open its installer and you find the same two pieces used here: a sudoers rule and a script that shells out to `pmset`. |
 
 Rather than install a helper daemon, run this once:
 
@@ -210,15 +221,23 @@ Rather than install a helper daemon, run this once:
 It installs a single sudoers rule granting two commands and nothing else:
 
 ```
-pmset -c disablesleep 1     # lid-closed mode on
-pmset -c disablesleep 0     # off
+pmset -a disablesleep 1     # lid-closed mode on
+pmset -a disablesleep 0     # off
 ```
 
 The arguments are fixed — no wildcard — so the rule cannot run `pmset` with any
 other setting, let alone another program. The worst it permits is stopping your
-Mac from sleeping on mains power, which is the point. The script validates the
-rule with `visudo -c` before installing it, because a malformed sudoers file
-locks you out of `sudo` entirely.
+Mac from sleeping, which is the point. The script validates the rule with
+`visudo -c` before installing it, because a malformed sudoers file locks you out
+of `sudo` entirely.
+
+`-a` and not `-c`, because `SleepDisabled` is a single global flag — it never
+appears under *AC Power* or *Battery Power* in `pmset -g custom`. "Only while
+plugged in" is therefore something pmset cannot promise, so the daemon does it:
+while the switch is on it watches the power source and clears the flag within
+30 seconds of the plug coming out, then sets it again when power is back. It
+also clears the flag when it shuts down, so a Mac that never sleeps can never
+outlive the thing that asked for it.
 
 After that, *Run with the lid closed* toggles from the phone. Undo it with
 `sudo rm /etc/sudoers.d/claude-remote-control`.

@@ -90,20 +90,32 @@ export async function reachableUrls(port, host = '0.0.0.0') {
   const urls = [];
   const ts = await tailscaleInfo();
 
+  // The tailnet IP goes above the MagicDNS name on purpose. The name only
+  // resolves on a device using Tailscale's DNS — MagicDNS off, or a phone that
+  // has not applied it, and you get NXDOMAIN from an address the app told you
+  // to use. The 100.x address works whenever the tailnet is up.
+  for (const addr of localAddresses()) {
+    if (addr.kind !== 'tailscale') continue;
+    if (ts?.running === false) continue;
+    urls.push({
+      url: `http://${addr.address}:${port}`,
+      kind: 'tailscale',
+      label: 'Tailscale IP (anywhere)',
+    });
+  }
   if (ts?.running && ts.dnsName) {
-    urls.push({ url: `http://${ts.dnsName}:${port}`, kind: 'tailscale', label: 'Tailscale (anywhere)' });
+    urls.push({
+      url: `http://${ts.dnsName}:${port}`,
+      kind: 'tailscale',
+      label: 'Tailscale name (needs MagicDNS)',
+    });
   }
   for (const addr of localAddresses()) {
-    if (addr.kind === 'tailscale' && ts?.running === false) continue;
+    if (addr.kind === 'tailscale') continue;
     urls.push({
       url: `http://${addr.address}:${port}`,
       kind: addr.kind,
-      label:
-        addr.kind === 'tailscale'
-          ? 'Tailscale IP (anywhere)'
-          : addr.kind === 'lan'
-            ? `LAN via ${addr.iface}`
-            : `Public via ${addr.iface}`,
+      label: addr.kind === 'lan' ? `LAN via ${addr.iface}` : `Public via ${addr.iface}`,
     });
   }
   urls.push({ url: `http://localhost:${port}`, kind: 'local', label: 'This machine' });

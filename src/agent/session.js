@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Feed, summarizeTool } from '../protocol.js';
 import { getDriver, DEFAULT_DRIVER } from './drivers/index.js';
+import { BYPASS_MODE } from '../config.js';
 import { log } from '../log.js';
 
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
@@ -492,6 +493,10 @@ export class Session extends EventEmitter {
   async setPermissionMode(mode) {
     await this.driver.setPermissionMode?.(mode);
     this.permissionMode = mode;
+    // Switching to "never ask" while a prompt is on screen has to clear that
+    // prompt too, or the switch says one thing and the phone shows another —
+    // and the agent sits there waiting for an answer nobody will give.
+    if (mode === BYPASS_MODE) this.allowAllPending();
     this.feed.append({ kind: 'system', text: `Permission mode: ${mode}` });
     this.emit('state', this.toJSON());
   }
@@ -503,6 +508,16 @@ export class Session extends EventEmitter {
    * push the decision to every connected phone; whoever answers first wins.
    */
   requestPermission(toolName, input, opts = {}) {
+    // "Never ask" has to mean never, whatever the agent underneath believes.
+    // Claude Code honours the mode itself and stops calling us; an ACP agent
+    // asks regardless; Antigravity asks on the host. Answering here is the one
+    // place that covers all three, and it is the last gate before a prompt
+    // would be pushed to a phone.
+    if (this.permissionMode === BYPASS_MODE) {
+      if (opts.toolUseID) this.feed.markToolRunning(opts.toolUseID);
+      return Promise.resolve({ behavior: 'allow' });
+    }
+
     const requestId = opts.requestId || randomUUID();
     const { title, subtitle } = summarizeTool(toolName, input);
 
@@ -592,6 +607,13 @@ export class Session extends EventEmitter {
   rejectAllPermissions(reason) {
     for (const requestId of [...this.pendingPermissions.keys()]) {
       this.finishPermission(requestId, { behavior: 'deny', message: reason }, 'cancelled');
+    }
+  }
+
+  /** Answer everything still waiting with yes. Used when "never ask" comes on. */
+  allowAllPending() {
+    for (const requestId of [...this.pendingPermissions.keys()]) {
+      this.finishPermission(requestId, { behavior: 'allow' }, 'allowed');
     }
   }
 

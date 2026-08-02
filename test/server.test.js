@@ -273,6 +273,54 @@ describe('sessions', () => {
   });
 });
 
+describe('permission settings', () => {
+  test('an unknown permission mode is refused everywhere it can be set', async () => {
+    for (const [route, body] of [
+      ['/api/sessions', { cwd: WORK, permissionMode: 'yolo' }],
+      ['/api/settings', { defaultPermissionMode: 'yolo' }],
+    ]) {
+      const res = await get(route, config.token, { method: 'POST', body: JSON.stringify(body) });
+      assert.equal(res.status, 400, `${route} refused the mode`);
+      assert.match((await res.json()).error, /Unknown permission mode/);
+    }
+  });
+
+  test('turning "never ask" on reaches the session already open', async () => {
+    const created = await get('/api/sessions', config.token, {
+      method: 'POST',
+      body: JSON.stringify({ cwd: WORK }),
+    });
+    const { session } = await created.json();
+    assert.equal(session.permissionMode, 'default');
+
+    const res = await get('/api/settings', config.token, {
+      method: 'POST',
+      body: JSON.stringify({ defaultPermissionMode: 'bypassPermissions', applyToOpenSessions: true }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).applied, 1, 'the open session was switched too');
+
+    const { sessions } = await (await get('/api/sessions')).json();
+    assert.equal(sessions.find((s) => s.id === session.id).permissionMode, 'bypassPermissions');
+
+    // And a new session inherits it without being told.
+    const next = await get('/api/sessions', config.token, {
+      method: 'POST',
+      body: JSON.stringify({ cwd: WORK }),
+    });
+    assert.equal((await next.json()).session.permissionMode, 'bypassPermissions');
+
+    await get(`/api/sessions/${session.id}`, config.token, { method: 'DELETE' });
+    for (const s of (await (await get('/api/sessions')).json()).sessions) {
+      await get(`/api/sessions/${s.id}`, config.token, { method: 'DELETE' });
+    }
+    await get('/api/settings', config.token, {
+      method: 'POST',
+      body: JSON.stringify({ defaultPermissionMode: 'default' }),
+    });
+  });
+});
+
 describe('transcript mirroring', () => {
   test('lists transcripts found on disk', async () => {
     const { transcripts } = await (await get('/api/transcripts')).json();

@@ -4,18 +4,25 @@
 # password every time.
 #
 # `caffeinate` cannot do that: closing the lid is a separate event from idling,
-# and only `pmset -c disablesleep` suppresses it. That needs root — which is why
-# apps like Power Protect for Amphetamine install a privileged helper.
+# and only `pmset disablesleep` suppresses it. That needs root — which is why
+# apps like Power Protect for Amphetamine install a privileged helper. Power
+# Protect ships this exact pair (a sudoers rule plus a script that shells out to
+# pmset); this is the same idea with a narrower grant.
 #
-# Rather than a helper daemon, this installs one sudoers rule that grants
-# exactly two commands and nothing else:
+# `-a` rather than `-c`: SleepDisabled is a single global flag — it never
+# appears under "AC Power" or "Battery Power" in `pmset -g custom` — so asking
+# for it per power source would only look like a promise the setting cannot
+# keep. The daemon does the AC-only part itself, clearing the flag whenever the
+# Mac is running on battery.
 #
-#     pmset -c disablesleep 1     turn closed-lid mode on
-#     pmset -c disablesleep 0     turn it off
+# The rule grants exactly two commands and nothing else:
 #
-# The arguments are fixed, so the rule cannot be used to run pmset with any
-# other setting, let alone another program. The worst it can do is stop your Mac
-# sleeping while on mains power — which is the point.
+#     pmset -a disablesleep 1     turn closed-lid mode on
+#     pmset -a disablesleep 0     turn it off
+#
+# The arguments are fixed, so it cannot be used to run pmset with any other
+# setting, let alone another program. The worst it can do is stop your Mac
+# sleeping — which is the point.
 #
 # Run once:   ./scripts/allow-lid-control.sh
 # Undo with:  sudo rm /etc/sudoers.d/claude-remote-control
@@ -31,12 +38,12 @@ if [ ! -x "$PMSET" ]; then
   exit 1
 fi
 
-RULE="${USER_NAME} ALL=(root) NOPASSWD: ${PMSET} -c disablesleep 1, ${PMSET} -c disablesleep 0"
+RULE="${USER_NAME} ALL=(root) NOPASSWD: ${PMSET} -a disablesleep 1, ${PMSET} -a disablesleep 0"
 
 echo "This grants ${USER_NAME} permission to run exactly these, without a password:"
 echo
-echo "    ${PMSET} -c disablesleep 1"
-echo "    ${PMSET} -c disablesleep 0"
+echo "    ${PMSET} -a disablesleep 1"
+echo "    ${PMSET} -a disablesleep 0"
 echo
 echo "Nothing else. You will be asked for your password once, now."
 echo
@@ -54,7 +61,7 @@ fi
 
 sudo install -m 0440 -o root -g wheel "$TMP" "$RULE_FILE"
 
-if sudo -n "$PMSET" -c disablesleep 0 2>/dev/null; then
+if sudo -n "$PMSET" -a disablesleep 0 2>/dev/null; then
   echo "Done. Closed-lid mode can now be toggled from the app."
 else
   echo "Installed, but the permission did not take effect. Check $RULE_FILE." >&2

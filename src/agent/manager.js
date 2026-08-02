@@ -61,6 +61,17 @@ export class SessionManager extends EventEmitter {
     return session;
   }
 
+  /**
+   * Put every live session in one permission mode. Turning "never ask" on is
+   * useless if it only applies to sessions started afterwards — the one you
+   * are staring at is the one prompting you.
+   */
+  async setPermissionModeAll(mode) {
+    const sessions = [...this.sessions.values()];
+    await Promise.all(sessions.map((session) => session.setPermissionMode(mode)));
+    return sessions.length;
+  }
+
   async close(id) {
     const session = this.sessions.get(id);
     if (!session) return false;

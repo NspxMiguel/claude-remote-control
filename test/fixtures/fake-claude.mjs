@@ -26,6 +26,15 @@ const emit = (msg) => process.stdout.write(`${JSON.stringify(msg)}\n`);
 const pendingPermissions = new Map();
 let turn = 0;
 
+/**
+ * The real CLI decides for itself whether a tool needs a human, and in
+ * bypassPermissions it never asks — the SDK will not even forward the question.
+ * A fixture that asks regardless would hang there waiting for an answer nobody
+ * is coming to give.
+ */
+const modeFlag = process.argv.indexOf('--permission-mode');
+let permissionMode = modeFlag === -1 ? 'default' : process.argv[modeFlag + 1] || 'default';
+
 const respond = (requestId, response = {}) =>
   emit({ type: 'control_response', response: { request_id: requestId, subtype: 'success', response } });
 
@@ -86,7 +95,10 @@ async function runTurn(promptText, imageCount = 0) {
     },
   });
 
-  const decision = await askPermission('Bash', { command: `echo ${promptText}` }, toolUseId);
+  const decision =
+    permissionMode === 'bypassPermissions'
+      ? { behavior: 'allow' }
+      : await askPermission('Bash', { command: `echo ${promptText}` }, toolUseId);
 
   if (decision?.behavior === 'allow') {
     emit({
@@ -162,7 +174,7 @@ rl.on('line', async (line) => {
       tools: ['Bash', 'Read', 'Edit'],
       mcp_servers: [],
       model: 'fake-model',
-      permissionMode: 'default',
+      permissionMode,
       slash_commands: [],
       apiKeySource: 'oauth',
       claude_code_version: '0.0.0-fake',
@@ -193,6 +205,12 @@ rl.on('line', async (line) => {
   }
 
   if (msg.type === 'control_request' && msg.request?.subtype === 'set_model') {
+    respond(msg.request_id, {});
+    return;
+  }
+
+  if (msg.type === 'control_request' && msg.request?.subtype === 'set_permission_mode') {
+    permissionMode = msg.request.mode || permissionMode;
     respond(msg.request_id, {});
     return;
   }
