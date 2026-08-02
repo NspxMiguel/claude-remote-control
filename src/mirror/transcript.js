@@ -3,7 +3,7 @@
  * format under ~/.claude/projects. Reading it is how the phone can watch a
  * session that is running on the desktop, live, without touching it.
  */
-import { normalizeToolResult, summarizeTool } from '../protocol.js';
+import { diffStat, normalizeToolResult, summarizeTool } from '../protocol.js';
 
 function textFromContent(content) {
   if (typeof content === 'string') return content;
@@ -62,6 +62,7 @@ export function applyTranscriptLine(feed, line) {
             title,
             subtitle,
             status: 'pending',
+            diff: diffStat(block.name, block.input || {}),
           });
           if (block.id) feed.toolIndex.set(block.id, item);
         }
@@ -114,6 +115,8 @@ export function foldToolResult(feed, line) {
       status: isError ? 'error' : 'done',
       result: text,
       resultTruncated: truncated,
+      // structuredPatch lives here, so this is the exact diffstat.
+      diff: diffStat(item.name, item.input, line.toolUseResult),
     });
   }
 }

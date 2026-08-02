@@ -22,6 +22,99 @@ const TOOL_GLYPH = {
 
 
 
+/** Verb for each tool category, used to build a group's summary line. */
+const KIND_VERB = { write: 'Edited', run: 'Ran', read: 'Read', other: 'Used' };
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The one-line summary for a run of tool calls, in the shape the Claude Code
+ * desktop app uses: "Created 6 files", "Ran 2 commands, created e2e.mjs".
+ * Clauses appear in the order their category first occurred, which is what
+ * makes the sentence read like a narration of what happened.
+ */
+export function groupSummary(tools) {
+  const buckets = new Map();
+  for (const tool of tools) {
+    const kind = tool.toolKind || 'other';
+    if (!buckets.has(kind)) buckets.set(kind, []);
+    buckets.get(kind).push(tool);
+  }
+
+  const clauses = [];
+  for (const [kind, group] of buckets) {
+    const only = group.length === 1 ? group[0] : null;
+
+    if (kind === 'write') {
+      // "Created" reads wrong for an in-place edit, so distinguish the two.
+      const created = group.filter((t) => t.name === 'Write').length;
+      const verb = created === group.length ? 'Created' : created === 0 ? 'Edited' : 'Changed';
+      clauses.push(only ? `${verb} ${fileName(only)}` : `${verb} ${plural(group.length, 'file', 'files')}`);
+    } else if (kind === 'run') {
+      // One command is more useful named than counted.
+      clauses.push(only ? `Ran ${shortCommand(only)}` : `Ran ${plural(group.length, 'command', 'commands')}`);
+    } else if (kind === 'read') {
+      clauses.push(only ? `Read ${fileName(only)}` : `Read ${plural(group.length, 'file', 'files')}`);
+    } else {
+      clauses.push(only ? `Used ${only.title || 'a tool'}` : `Used ${plural(group.length, 'tool', 'tools')}`);
+    }
+  }
+
+  let added = 0;
+  let removed = 0;
+  for (const tool of tools) {
+    added += tool.diff?.added || 0;
+    removed += tool.diff?.removed || 0;
+  }
+
+  // Two clauses is the readable limit on a phone; the count badge already says
+  // how much is inside, so trailing categories are dropped rather than listed.
+  const text = clauses
+    .slice(0, 2)
+    .map((clause, index) => (index === 0 ? clause : clause.charAt(0).toLowerCase() + clause.slice(1)))
+    .join(', ');
+
+  return { text, added, removed, hasDiff: added > 0 || removed > 0 };
+}
+
+/** A tool's own subtitle is already a short path; take just the file name. */
+function fileName(tool) {
+  const path = tool.input?.file_path || tool.input?.notebook_path || tool.subtitle || '';
+  return String(path).split('/').pop() || 'file';
+}
+
+/**
+ * The recognisable head of a command — enough to know what ran without the
+ * flags, redirects and heredocs that make real commands unreadable inline.
+ */
+function shortCommand(tool) {
+  const command = String(tool.input?.command || tool.subtitle || '').trim();
+  if (!command) return 'a command';
+
+  // Real commands open with env assignments, subshells and redirects. Scan the
+  // whole thing for the first token that names an actual program.
+  const noise = /^([A-Za-z_][A-Za-z0-9_]*=|[(){}<>|&;]|cd$|then$|do$|if$|until$|while$)/;
+  const tokens = command.split(/[\s\n]+/).filter(Boolean);
+  const start = tokens.findIndex((t) => !noise.test(t));
+  if (start === -1) return 'a command';
+
+  const head = tokens
+    .slice(start, start + 2)
+    .filter((t) => !/^[<>|&]/.test(t))
+    .join(' ');
+  return head.length > 26 ? `${head.slice(0, 25)}…` : head || 'a command';
+}
+
+/** Worst-case status of a run, so the summary can show it without expanding. */
+export function groupStatus(tools) {
+  if (tools.some((t) => t.status === 'error')) return 'error';
+  if (tools.some((t) => t.status === 'denied')) return 'denied';
+  if (tools.some((t) => t.status === 'running' || t.status === 'pending' || t.status === 'building')) {
+    return 'running';
+  }
+  return 'done';
+}
+
 /**
  * Items re-render whenever they change — a tool card is rebuilt when its result
  * lands. Without this, a card you opened to watch would snap shut at the exact
@@ -49,6 +142,58 @@ export function insertByOrder(container, node, ord) {
     }
   }
   container.prepend(node);
+}
+
+/**
+ * Build (or reuse) the collapsible container for a run of tool calls. Tool cards
+ * live inside it; the summary row is rewritten whenever the run changes.
+ */
+export function ensureGroupNode(groups, feedEl, item, insert) {
+  let group = groups.get(item.group);
+  if (group) return group;
+
+  const node = el('details', 'item tool-group');
+  const summary = el('summary', 'group-summary');
+  const list = el('div', 'group-list');
+  node.append(summary, list);
+  node.dataset.ord = item.ord;
+
+  // Once you open or close a run yourself, it stays how you left it.
+  node.addEventListener('toggle', () => {
+    node.dataset.touched = '1';
+  });
+
+  insert(feedEl, node, item.ord);
+  group = { node, summary, list, tools: new Map() };
+  groups.set(item.group, group);
+  return group;
+}
+
+/** Rewrite a group's summary row from the tools currently in it. */
+export function refreshGroup(group) {
+  const tools = [...group.tools.values()].sort((a, b) => a.ord - b.ord);
+  const { text, added, removed, hasDiff } = groupSummary(tools);
+  const status = groupStatus(tools);
+
+  group.summary.innerHTML = '';
+  group.node.dataset.status = status;
+
+  const caret = el('span', 'group-caret', '›');
+  const label = el('span', 'group-label', text);
+  group.summary.append(caret, label);
+
+  if (hasDiff) {
+    const stat = el('span', 'group-diff');
+    if (added) stat.appendChild(el('span', 'add', `+${added}`));
+    if (removed) stat.appendChild(el('span', 'del', `−${removed}`));
+    group.summary.appendChild(stat);
+  }
+  if (status === 'running') group.summary.appendChild(el('span', 'group-spinner'));
+  else group.summary.appendChild(el('span', 'group-count', String(tools.length)));
+
+  // Follow the work while it happens, then tuck it away — unless the reader
+  // has already expressed a preference by toggling it.
+  if (!group.node.dataset.touched) group.node.open = status === 'running';
 }
 
 export function renderItem(item) {

@@ -41,10 +41,88 @@ export function summarizeTool(name, input = {}) {
       return { title: 'Tasks', subtitle: str(input.subject || '') };
     default:
       if (name?.startsWith('mcp__')) {
+        // mcp__Claude_Browser__navigate → "Claude Browser" / "navigate"
         const parts = name.split('__');
-        return { title: parts[1] || 'MCP', subtitle: parts.slice(2).join('.') };
+        return {
+          title: (parts[1] || 'MCP').replace(/[_-]+/g, ' ').trim(),
+          subtitle: parts.slice(2).join('.'),
+        };
       }
       return { title: name || 'Tool', subtitle: '' };
+  }
+}
+
+/**
+ * How each tool counts towards a group's summary line. File writes contribute
+ * to the +N/-M diffstat; commands and lookups are counted but have no diffstat.
+ */
+export const TOOL_KIND = {
+  Write: 'write',
+  Edit: 'write',
+  MultiEdit: 'write',
+  NotebookEdit: 'write',
+  Bash: 'run',
+  BashOutput: 'run',
+  KillShell: 'run',
+  Read: 'read',
+  Glob: 'read',
+  Grep: 'read',
+  NotebookRead: 'read',
+  WebFetch: 'read',
+  WebSearch: 'read',
+};
+
+export const toolKind = (name) => TOOL_KIND[name] || 'other';
+
+const countLines = (text) => {
+  if (typeof text !== 'string' || text === '') return 0;
+  return text.replace(/\n$/, '').split('\n').length;
+};
+
+/**
+ * Lines added and removed by a tool call.
+ *
+ * Claude Code returns a `structuredPatch` for edits — hunks whose lines are
+ * prefixed with '+', '-' or ' ' — which is exact, including deletions when a
+ * file is overwritten. Only when that is missing (a brand new file, or a live
+ * stream where the result has not arrived) does this fall back to counting the
+ * strings in the tool's own input.
+ */
+export function diffStat(name, input = {}, result) {
+  if (toolKind(name) !== 'write') return null;
+
+  const patch = result && typeof result === 'object' ? result.structuredPatch : null;
+  if (Array.isArray(patch) && patch.length) {
+    let added = 0;
+    let removed = 0;
+    for (const hunk of patch) {
+      for (const line of hunk?.lines || []) {
+        if (line.startsWith('+')) added++;
+        else if (line.startsWith('-')) removed++;
+      }
+    }
+    return { added, removed };
+  }
+
+  switch (name) {
+    case 'Write':
+      // A patch-less Write is a new file: everything in it is an addition.
+      return { added: countLines(input.content), removed: 0 };
+    case 'Edit':
+      return { added: countLines(input.new_string), removed: countLines(input.old_string) };
+    case 'MultiEdit': {
+      let added = 0;
+      let removed = 0;
+      for (const edit of input.edits || []) {
+        added += countLines(edit?.new_string);
+        removed += countLines(edit?.old_string);
+      }
+      return { added, removed };
+    }
+    case 'NotebookEdit':
+      return { added: countLines(input.new_source), removed: 0 };
+    default:
+      return { added: 0, removed: 0 };
   }
 }
 
@@ -89,6 +167,13 @@ export class Feed {
     /** Creation order, never reassigned, so the transcript stays chronological. */
     this.ord = 0;
     this.maxItems = maxItems;
+    /**
+     * Consecutive tool calls share a group id so the client can collapse them
+     * into one summary row. Prose from the assistant (or a new user turn) ends
+     * the run; thinking and permission prompts belong to it and do not.
+     */
+    this.groupCounter = 0;
+    this.currentGroup = null;
     this.onPatch = onPatch || (() => {});
     /** `${messageId}:${blockIndex}` -> item, for streaming deltas. */
     this.blockIndex = new Map();
@@ -102,6 +187,22 @@ export class Feed {
   }
 
   append(item) {
+    // Reasoning arrives in separate blocks that read as one train of thought;
+    // stacking a row of identical "Thinking" boxes is just noise.
+    if (item.kind === 'thinking' && item.text?.trim()) {
+      const previous = this.items.at(-1);
+      if (previous?.kind === 'thinking' && !previous.streaming && !item.streaming) {
+        return this.update(previous, { text: `${previous.text}\n\n${item.text}` });
+      }
+    }
+
+    if (item.kind === 'tool') {
+      if (!this.currentGroup) this.currentGroup = `g${++this.groupCounter}`;
+      item = { ...item, group: this.currentGroup, toolKind: toolKind(item.name) };
+    } else if (item.kind !== 'thinking' && item.kind !== 'permission') {
+      this.currentGroup = null;
+    }
+
     const full = {
       ...item,
       id: item.id || nextId(),
@@ -222,6 +323,7 @@ export class Feed {
             subtitle,
             status: existing.status === 'building' ? 'pending' : existing.status,
             rawInput: undefined,
+            diff: existing.diff ?? diffStat(block.name, block.input || {}),
           });
         } else {
           const item = this.append({
@@ -232,6 +334,8 @@ export class Feed {
             title,
             subtitle,
             status: 'pending',
+            // Estimated from the input; replaced by the exact patch on result.
+            diff: diffStat(block.name, block.input || {}),
           });
           this.toolIndex.set(block.id, item);
         }
@@ -269,6 +373,8 @@ export class Feed {
         status: isError || block.is_error ? 'error' : 'done',
         result: text,
         resultTruncated: truncated,
+        // The result carries the real patch, so the diffstat is exact now.
+        diff: diffStat(item.name, item.input, payload),
       });
     }
   }

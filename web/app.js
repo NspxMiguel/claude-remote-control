@@ -2,7 +2,13 @@
 
 import { el, $ } from './dom.js';
 import { renderMarkdown } from './markdown.js';
-import { carryOverOpenState, insertByOrder, renderItem } from './feed-view.js';
+import {
+  carryOverOpenState,
+  ensureGroupNode,
+  insertByOrder,
+  refreshGroup,
+  renderItem,
+} from './feed-view.js';
 
 const TOKEN_KEY = 'crc.token';
 const LAST_SESSION_KEY = 'crc.lastSession';
@@ -222,7 +228,7 @@ function setConn(status) {
 function viewFor(sessionId) {
   let view = state.views.get(sessionId);
   if (!view) {
-    view = { lastSeq: 0, nodes: new Map(), pinned: true };
+    view = { lastSeq: 0, nodes: new Map(), groups: new Map(), pinned: true };
     state.views.set(sessionId, view);
   }
   return view;
@@ -233,8 +239,21 @@ function applyItems(sessionId, items) {
   const feed = $('#feed');
   const wasAtBottom = isAtBottom();
 
+  const touchedGroups = new Set();
+
   for (const item of items) {
     if (item.seq > view.lastSeq) view.lastSeq = item.seq;
+
+    // A run of tool calls renders as one collapsible row containing the cards,
+    // so the transcript reads as narration instead of a wall of tool output.
+    const group = item.kind === 'tool' && item.group
+      ? ensureGroupNode(view.groups, feed, item, insertByOrder)
+      : null;
+    const container = group ? group.list : feed;
+    if (group) {
+      group.tools.set(item.id, item);
+      touchedGroups.add(group);
+    }
 
     const existing = view.nodes.get(item.id);
     if (existing) {
@@ -254,9 +273,11 @@ function applyItems(sessionId, items) {
     const node = renderItem(item);
     if (!node) continue;
     node.dataset.ord = item.ord;
-    insertByOrder(feed, node, item.ord);
+    insertByOrder(container, node, item.ord);
     view.nodes.set(item.id, node);
   }
+
+  for (const group of touchedGroups) refreshGroup(group);
 
   $('#empty-state').hidden = view.nodes.size > 0;
   if (wasAtBottom || view.pinned) scrollToBottom();

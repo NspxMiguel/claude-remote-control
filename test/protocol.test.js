@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
-import { Feed, normalizeToolResult, summarizeTool } from '../src/protocol.js';
+import { diffStat, Feed, normalizeToolResult, summarizeTool, toolKind } from '../src/protocol.js';
 
 const streamText = (feed, text, { index = 0, messageId = 'm1' } = {}) => {
   feed.handleStreamEvent({ event: { type: 'message_start', message: { id: messageId } } });
@@ -156,6 +156,143 @@ describe('Feed ordering and replay', () => {
     const item = feed.append({ kind: 'text', text: 'x' });
     feed.update(item, { text: 'y' });
     assert.deepEqual(patches, ['append', 'update']);
+  });
+});
+
+describe('tool grouping', () => {
+  test('consecutive tool calls share a group', () => {
+    const feed = new Feed();
+    feed.append({ kind: 'tool', name: 'Write' });
+    feed.append({ kind: 'tool', name: 'Bash' });
+    const groups = new Set(feed.items.filter((i) => i.kind === 'tool').map((i) => i.group));
+    assert.equal(groups.size, 1);
+  });
+
+  test('assistant prose ends a run', () => {
+    const feed = new Feed();
+    feed.append({ kind: 'tool', name: 'Write' });
+    feed.append({ kind: 'text', text: 'Now the next part:' });
+    feed.append({ kind: 'tool', name: 'Bash' });
+
+    const [first, second] = feed.items.filter((i) => i.kind === 'tool');
+    assert.notEqual(first.group, second.group);
+  });
+
+  test('a new user turn ends a run', () => {
+    const feed = new Feed();
+    feed.append({ kind: 'tool', name: 'Bash' });
+    feed.append({ kind: 'user', text: 'also do this' });
+    feed.append({ kind: 'tool', name: 'Bash' });
+
+    const [first, second] = feed.items.filter((i) => i.kind === 'tool');
+    assert.notEqual(first.group, second.group);
+  });
+
+  test('thinking and permission prompts belong to the run and do not split it', () => {
+    const feed = new Feed();
+    feed.append({ kind: 'tool', name: 'Write' });
+    feed.append({ kind: 'thinking', text: 'considering' });
+    feed.append({ kind: 'permission', title: 'Run Bash', state: 'pending' });
+    feed.append({ kind: 'tool', name: 'Bash' });
+
+    const groups = new Set(feed.items.filter((i) => i.kind === 'tool').map((i) => i.group));
+    assert.equal(groups.size, 1, 'the run survives thinking and an approval');
+  });
+
+  test('every tool carries its category for the summary line', () => {
+    const feed = new Feed();
+    feed.append({ kind: 'tool', name: 'Edit' });
+    feed.append({ kind: 'tool', name: 'Bash' });
+    feed.append({ kind: 'tool', name: 'Grep' });
+    feed.append({ kind: 'tool', name: 'mcp__thing__do' });
+
+    assert.deepEqual(
+      feed.items.map((i) => i.toolKind),
+      ['write', 'run', 'read', 'other'],
+    );
+  });
+
+  test('consecutive thinking blocks merge into one', () => {
+    const feed = new Feed();
+    feed.append({ kind: 'thinking', text: 'first thought' });
+    feed.append({ kind: 'thinking', text: 'second thought' });
+
+    const thinking = feed.items.filter((i) => i.kind === 'thinking');
+    assert.equal(thinking.length, 1);
+    assert.equal(thinking[0].text, 'first thought\n\nsecond thought');
+  });
+
+  test('thinking separated by other content stays separate', () => {
+    const feed = new Feed();
+    feed.append({ kind: 'thinking', text: 'before' });
+    feed.append({ kind: 'tool', name: 'Bash' });
+    feed.append({ kind: 'thinking', text: 'after' });
+    assert.equal(feed.items.filter((i) => i.kind === 'thinking').length, 2);
+  });
+});
+
+describe('toolKind', () => {
+  test('classifies writes, commands, lookups and everything else', () => {
+    assert.equal(toolKind('Write'), 'write');
+    assert.equal(toolKind('Edit'), 'write');
+    assert.equal(toolKind('MultiEdit'), 'write');
+    assert.equal(toolKind('Bash'), 'run');
+    assert.equal(toolKind('Read'), 'read');
+    assert.equal(toolKind('Grep'), 'read');
+    assert.equal(toolKind('WebSearch'), 'read');
+    assert.equal(toolKind('mcp__server__tool'), 'other');
+    assert.equal(toolKind('TodoWrite'), 'other');
+  });
+});
+
+describe('diffStat', () => {
+  test('prefers the structuredPatch, which is exact', () => {
+    const result = {
+      structuredPatch: [
+        { lines: [' context', '+added one', '+added two', '-removed one'] },
+        { lines: ['+added three', ' context'] },
+      ],
+    };
+    assert.deepEqual(diffStat('Edit', {}, result), { added: 3, removed: 1 });
+  });
+
+  test('a new file counts its whole contents as additions', () => {
+    assert.deepEqual(diffStat('Write', { content: 'a\nb\nc' }), { added: 3, removed: 0 });
+  });
+
+  test('a trailing newline does not invent a line', () => {
+    assert.deepEqual(diffStat('Write', { content: 'a\nb\n' }), { added: 2, removed: 0 });
+    assert.deepEqual(diffStat('Write', { content: '' }), { added: 0, removed: 0 });
+  });
+
+  test('an edit counts both sides', () => {
+    assert.deepEqual(
+      diffStat('Edit', { old_string: 'one\ntwo', new_string: 'one\ntwo\nthree' }),
+      { added: 3, removed: 2 },
+    );
+  });
+
+  test('MultiEdit sums its edits', () => {
+    const input = {
+      edits: [
+        { old_string: 'a', new_string: 'a\nb' },
+        { old_string: 'c\nd', new_string: 'c' },
+      ],
+    };
+    assert.deepEqual(diffStat('MultiEdit', input), { added: 3, removed: 3 });
+  });
+
+  test('non-write tools have no diffstat at all', () => {
+    assert.equal(diffStat('Bash', { command: 'ls' }), null);
+    assert.equal(diffStat('Read', { file_path: '/a' }), null);
+  });
+
+  test('an empty patch falls back to the input rather than reporting nothing', () => {
+    // Claude Code sends structuredPatch: [] when it writes a brand new file.
+    assert.deepEqual(
+      diffStat('Write', { content: 'x\ny' }, { structuredPatch: [] }),
+      { added: 2, removed: 0 },
+    );
   });
 });
 
