@@ -4,6 +4,9 @@
 
 # Claude Remote Control
 
+[![test](https://github.com/NspxMiguel/claude-remote-control/actions/workflows/test.yml/badge.svg)](https://github.com/NspxMiguel/claude-remote-control/actions/workflows/test.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Drive Claude Code on your own machine from your phone — anywhere in the world.**
 
 A small daemon runs on your computer. A PWA runs in your pocket. Together they
@@ -228,12 +231,14 @@ network resumes with `?since=<seq>` instead of refetching the conversation.
 npm test
 ```
 
-97 tests covering the feed protocol, transcript parsing, auth, path
-confinement, and the HTTP/WebSocket surface. No network or credentials needed:
-session tests run against a fake Claude Code executable
-(`test/fixtures/fake-claude.mjs`) that speaks the Agent SDK's control protocol,
-so streaming, permission approval, denial, timeout and interrupts are all
-exercised end to end.
+The suite covers the feed protocol, transcript parsing, auth, path confinement,
+markdown escaping, icon generation, and the HTTP/WebSocket surface. It needs no
+network and no credentials: session tests run against a fake Claude Code
+executable (`test/fixtures/fake-claude.mjs`) that speaks the Agent SDK's control
+protocol, so streaming, image attachments, permission approval, denial, timeout
+and interrupts are all exercised end to end.
+
+CI runs it on Node 20, 22 and 24 across Linux and macOS.
 
 ```bash
 npm run icons
