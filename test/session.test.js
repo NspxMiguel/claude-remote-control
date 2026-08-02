@@ -171,6 +171,30 @@ describe('session lifecycle', () => {
   });
 });
 
+describe('tool policy', () => {
+  test('disallowed tools actually reach the Claude Code process', async () => {
+    const argvFile = path.join(WORK, 'argv.json');
+    process.env.FAKE_CLAUDE_ARGV_FILE = argvFile;
+
+    const session = manager.create({ cwd: WORK });
+    try {
+      await waitFor(session, (s) => s.claudeSessionId, 'init');
+      const argv = JSON.parse(fs.readFileSync(argvFile, 'utf8'));
+      const flat = argv.join(' ');
+
+      assert.match(flat, /AskUserQuestion/, 'the default policy is on the command line');
+      assert.match(flat, /--disallowed[Tt]ools/, 'passed as the disallowed-tools flag');
+    } finally {
+      delete process.env.FAKE_CLAUDE_ARGV_FILE;
+      await manager.close(session.id);
+    }
+  });
+
+  test('the default policy refuses the tool that would stall a turn', () => {
+    assert.ok(config.disallowedTools.includes('AskUserQuestion'));
+  });
+});
+
 describe('failure reporting', () => {
   test('a missing Claude Code install explains the fix in this app’s terms', async () => {
     const previous = config.claudeExecutable;

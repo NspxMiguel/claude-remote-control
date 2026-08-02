@@ -611,8 +611,13 @@ function decide(decision) {
 }
 
 async function notifyPermission(payload) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
   if (!document.hidden) return;
+
+  // Served over plain HTTP on a LAN, the Notification API is unavailable — the
+  // chime and the tab title are the only ways to get attention there.
+  chime();
+
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try {
     const reg = await navigator.serviceWorker?.ready;
     const options = {
@@ -624,6 +629,34 @@ async function notifyPermission(payload) {
     else new Notification(payload.title || 'Permission needed', options);
   } catch {
     /* notifications are a nicety, never a hard failure */
+  }
+}
+
+/** A short two-tone chime. Web Audio works in insecure contexts; notifications don't. */
+function chime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    state.audio ||= new Ctx();
+    const ctx = state.audio;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    const now = ctx.currentTime;
+    for (const [index, frequency] of [880, 1174].entries()) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = frequency;
+      osc.type = 'sine';
+      const start = now + index * 0.13;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.16, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.14);
+    }
+  } catch {
+    /* audio is a nicety too */
   }
 }
 
@@ -1010,8 +1043,15 @@ function wireUp() {
   });
   $('#unpair').addEventListener('click', () => unpair(false));
   $('#enable-notifs').addEventListener('click', async () => {
-    if (!('Notification' in window)) return toast('Notifications are unsupported here');
+    // Browsers only expose notifications over HTTPS (or localhost), which a
+    // plain-HTTP LAN address is not. Say why rather than failing silently.
+    if (!window.isSecureContext || !('Notification' in window)) {
+      chime();
+      toast('System alerts need HTTPS — you’ll get a chime and a tab badge instead. See the README for `tailscale serve`.');
+      return;
+    }
     const result = await Notification.requestPermission();
+    if (result === 'granted') chime();
     toast(result === 'granted' ? 'Alerts on' : 'Alerts not granted');
   });
 

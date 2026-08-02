@@ -7,9 +7,19 @@
  * This lets the test suite drive a full session end to end with no credentials
  * and no network. It is a test fixture, not a Claude Code implementation.
  */
+import fs from 'node:fs';
 import readline from 'node:readline';
 
 const SESSION_ID = 'fake-0000-0000-0000-000000000001';
+
+// Lets a test assert on the flags the SDK actually launched us with.
+if (process.env.FAKE_CLAUDE_ARGV_FILE) {
+  try {
+    fs.writeFileSync(process.env.FAKE_CLAUDE_ARGV_FILE, JSON.stringify(process.argv.slice(2)));
+  } catch {
+    /* the test will notice the missing file */
+  }
+}
 const emit = (msg) => process.stdout.write(`${JSON.stringify(msg)}\n`);
 
 /** request_id -> resolve, for permission answers coming back from the SDK. */

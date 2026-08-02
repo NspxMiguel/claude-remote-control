@@ -243,6 +243,9 @@ export class Session extends EventEmitter {
     if (this.config.claudeExecutable) {
       options.pathToClaudeCodeExecutable = this.config.claudeExecutable;
     }
+    if (this.config.disallowedTools?.length) {
+      options.disallowedTools = this.config.disallowedTools;
+    }
     if (this.resumeFrom) {
       options.resume = this.resumeFrom;
       options.forkSession = this.forkSession;

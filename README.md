@@ -117,6 +117,19 @@ the daemon still demands a token on top of it.
 Without Tailscale you get LAN addresses (`http://192.168.x.x:8787`), which work
 fine at home.
 
+### HTTPS, if you want system notifications
+
+Browsers only allow the Notification API on secure origins, so over plain HTTP
+you get a chime and a tab badge instead of a real notification. Tailscale can
+put a valid certificate in front of the daemon:
+
+```bash
+tailscale serve --bg 8787
+```
+
+Then open `https://your-machine.tail1234.ts.net` instead. Notifications, the
+clipboard API and PWA installation all behave properly there.
+
 ## Security
 
 You are handing a device the ability to run commands as you. Treat the token
@@ -213,9 +226,10 @@ network resumes with `?since=<seq>` instead of refetching the conversation.
 
 ## Limitations
 
-- **Notifications only fire while the app is open** (or recently backgrounded).
-  There is no push server, by design — that would mean routing your data
-  through someone else's infrastructure.
+- **Notifications only fire while the app is open** (or recently backgrounded),
+  and only over HTTPS — see `tailscale serve` above. On plain HTTP you get a
+  chime and a tab badge. There is no push server, by design: that would mean
+  routing your data through someone else's infrastructure.
 - **Interactive prompts inside a tool** (a shell command that asks a question)
   aren't forwarded; the tool will hang until it times out.
 - **Mirrored sessions are read-only.** Writing into a transcript another process
