@@ -33,6 +33,7 @@ commands, and ask your permission before it does.
 | **Photos and screenshots** | Attach from the camera or gallery, or paste one on desktop. Images are downscaled in the browser before upload, so a 12 MB photo crosses the network as a couple hundred KB. An agent with no native image support gets the file written beside the project and named in the prompt, so attaching works everywhere. |
 | **Sign an agent in from the phone** | Settings lists every agent, whether it is ready, and the exact command that signs it in. If you cannot reach a terminal, paste an API key instead — it is stored mode-600 next to the master token and exported to that agent only. It never comes back out over the API. |
 | **More than one agent** | Claude Code is the one this is built around. Cursor works through ACP, including remote approval. Antigravity works through its headless stream. The UI adapts to what each one can actually do. |
+| **Keeps the Mac up while you are out** | Two switches in Settings. *Keep this Mac awake* holds a `caffeinate -s`, which prevents idle sleep on mains power. *Run with the lid closed* flips `pmset -c disablesleep`, the only thing that survives shutting the lid — this is what Amphetamine's Power Protect installs a privileged helper for. |
 | **Nothing in the middle** | No cloud, no relay, no account. The daemon talks to your phone over your LAN or your tailnet, and the code that runs is the code in this repo. |
 
 ## Why
@@ -181,6 +182,37 @@ Lost a phone:
 ```bash
 npx crc token --rotate                                  # new master token, every device revoked
 ```
+
+## Keeping the Mac awake
+
+Two different things sleep a laptop, and they need two different answers.
+
+| | |
+|---|---|
+| **Idle sleep** | Nothing happening for a while. `caffeinate -s` prevents it, and only while plugged in — on battery the Mac still sleeps. No privileges needed, so *Keep this Mac awake* just works, and the process dies with the daemon so it cannot leave your Mac awake forever. |
+| **Lid sleep** | Closing the lid. `caffeinate` does not touch this; only `pmset -c disablesleep 1` does, and that needs root. This is exactly why Power Protect for Amphetamine ships a privileged helper. |
+
+Rather than install a helper daemon, run this once:
+
+```bash
+./scripts/allow-lid-control.sh                          # asks for your password, once
+```
+
+It installs a single sudoers rule granting two commands and nothing else:
+
+```
+pmset -c disablesleep 1     # lid-closed mode on
+pmset -c disablesleep 0     # off
+```
+
+The arguments are fixed — no wildcard — so the rule cannot run `pmset` with any
+other setting, let alone another program. The worst it permits is stopping your
+Mac from sleeping on mains power, which is the point. The script validates the
+rule with `visudo -c` before installing it, because a malformed sudoers file
+locks you out of `sudo` entirely.
+
+After that, *Run with the lid closed* toggles from the phone. Undo it with
+`sudo rm /etc/sudoers.d/claude-remote-control`.
 
 ## How it works
 

@@ -460,10 +460,11 @@ export class RemoteControlServer {
     // --- device management (master token only) --------------------------------------
     // --- setup tasks ------------------------------------------------------------------
     if (route === 'setup' && method === 'GET') {
-      const { checkTasks, keepAwake, suggestedRoots } = await import('./setup.js');
+      const { checkTasks, closedLid, keepAwake, suggestedRoots } = await import('./setup.js');
       json(res, 200, {
         tasks: await checkTasks(),
         keepAwake: keepAwake.toJSON(),
+        closedLid: await closedLid.state(),
         suggestedRoots: suggestedRoots(),
         defaultCwd: this.config.defaultCwd,
         allowedRoots: this.config.allowedRoots,
@@ -473,12 +474,13 @@ export class RemoteControlServer {
 
     if (route === 'setup/terminal' && method === 'POST') {
       const body = await readJsonBody(req);
-      const { TASKS, openInTerminal } = await import('./setup.js');
+      const { TASKS, closedLid, openInTerminal } = await import('./setup.js');
       // Only the commands this app itself suggests — never an arbitrary string
       // from a client, which would make this an execution endpoint.
-      const known = Object.values(TASKS)
-        .map((task) => task.manual)
-        .filter(Boolean);
+      const known = [
+        ...Object.values(TASKS).map((task) => task.manual),
+        (await closedLid.state()).setupCommand,
+      ].filter(Boolean);
       if (!known.includes(body.command)) {
         throw Object.assign(new Error('Unknown setup command.'), { status: 400 });
       }
@@ -490,6 +492,13 @@ export class RemoteControlServer {
     if (setupMatch && method === 'POST') {
       const { runTask } = await import('./setup.js');
       json(res, 200, { task: await runTask(setupMatch[1]) });
+      return;
+    }
+
+    if (route === 'setup/closed-lid' && method === 'PUT') {
+      const body = await readJsonBody(req);
+      const { closedLid } = await import('./setup.js');
+      json(res, 200, { closedLid: await closedLid.set(Boolean(body.enabled)) });
       return;
     }
 

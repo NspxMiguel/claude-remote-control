@@ -1042,6 +1042,62 @@ async function renderSetup() {
     container.appendChild(row);
   }
 
+  // Closed-lid mode. Separate from keep-awake because it needs root once:
+  // closing the lid is its own sleep event, and only pmset suppresses it.
+  if (data.closedLid?.supported) {
+    const row = el('div', 'agent-row');
+    const head = el('div', 'agent-head');
+    head.appendChild(el('i', `dot ${data.closedLid.active ? 'idle' : ''}`));
+    head.appendChild(el('span', 'agent-name', 'Run with the lid closed'));
+
+    if (data.closedLid.permitted) {
+      const toggle = el('button', 'link-btn', data.closedLid.active ? 'Turn off' : 'Turn on');
+      toggle.type = 'button';
+      toggle.addEventListener('click', async () => {
+        try {
+          await api('/api/setup/closed-lid', {
+            method: 'PUT',
+            body: JSON.stringify({ enabled: !data.closedLid.active }),
+          });
+          renderSetup();
+        } catch (err) {
+          toast(err.message);
+        }
+      });
+      head.appendChild(toggle);
+    } else {
+      head.appendChild(el('span', 'agent-state', 'needs permission once'));
+    }
+    row.appendChild(head);
+    row.appendChild(el('p', 'small muted', data.closedLid.description));
+
+    if (!data.closedLid.permitted) {
+      row.appendChild(
+        el(
+          'p',
+          'small muted',
+          'Changing this needs root, so it has to be granted once on the Mac. The script below ' +
+            'allows exactly two commands — turning this setting on and off — and nothing else.',
+        ),
+      );
+      const open = el('button', 'ghost-btn wide', 'Open in Terminal on the Mac');
+      open.type = 'button';
+      open.addEventListener('click', async () => {
+        try {
+          await api('/api/setup/terminal', {
+            method: 'POST',
+            body: JSON.stringify({ command: data.closedLid.setupCommand }),
+          });
+          toast('Opened on the Mac — press return and enter your password');
+        } catch (err) {
+          toast(err.message);
+        }
+      });
+      row.appendChild(open);
+    }
+    container.appendChild(row);
+  }
+
   // Project folder — where new sessions start.
   const folder = el('div', 'agent-row');
   const folderHead = el('div', 'agent-head');

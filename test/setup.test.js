@@ -9,13 +9,13 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import test, { after, describe } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crc-setup-')));
 process.env.CRC_CONFIG_DIR = TMP;
 
-const { TASKS, checkTasks, keepAwake, openInTerminal, runTask, suggestedRoots } = await import(
-  '../src/setup.js'
-);
+const { TASKS, checkTasks, closedLid, keepAwake, openInTerminal, runTask, suggestedRoots } =
+  await import('../src/setup.js');
 
 after(() => {
   keepAwake.disable();
@@ -69,6 +69,39 @@ describe('keep awake', () => {
     assert.equal(keepAwake.disable(), true);
     assert.equal(keepAwake.active, false);
     assert.equal(keepAwake.disable(), false, 'disabling twice is a no-op');
+  });
+});
+
+describe('closed-lid mode', () => {
+  test('reports state without ever prompting for a password', async () => {
+    const state = await closedLid.state();
+    assert.equal(state.supported, process.platform === 'darwin');
+
+    if (!state.supported) return;
+    // `sudo -n` is the whole point: a daemon must be able to ask "may I?"
+    // without hanging on a prompt nobody is there to answer.
+    assert.equal(typeof state.active, 'boolean');
+    assert.equal(typeof state.permitted, 'boolean');
+    assert.match(state.description, /lid closed/);
+    assert.match(state.setupCommand, /allow-lid-control\.sh$/);
+  });
+
+  test('is refused, not silently ignored, when permission was never granted', async () => {
+    const state = await closedLid.state();
+    if (!state.supported || state.permitted) return; // already set up on this machine
+    await assert.rejects(() => closedLid.set(true), /has not granted permission/);
+  });
+
+  test('the setup script exists and is executable', () => {
+    const script = fileURLToPath(new URL('../scripts/allow-lid-control.sh', import.meta.url));
+    assert.ok(fs.existsSync(script));
+    assert.doesNotThrow(() => fs.accessSync(script, fs.constants.X_OK));
+
+    // The rule it installs must not be able to run anything else.
+    const source = fs.readFileSync(script, 'utf8');
+    assert.match(source, /disablesleep 1, \$\{PMSET\} -c disablesleep 0/);
+    assert.ok(!source.includes('ALL=(ALL)'), 'never grants blanket sudo');
+    assert.match(source, /visudo -cf/, 'validates before installing');
   });
 });
 

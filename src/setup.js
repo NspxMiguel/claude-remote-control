@@ -13,12 +13,16 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { log } from './log.js';
 
 const exec = promisify(execCallback);
 
 /** Where GUI-launched processes have to look, since they get no login shell. */
 const EXTRA_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+
+/** Run once on the host to allow closed-lid mode without a password each time. */
+const LID_SETUP_COMMAND = fileURLToPath(new URL('../scripts/allow-lid-control.sh', import.meta.url));
 
 function shellEnv() {
   const merged = new Set([...(process.env.PATH || '').split(':'), ...EXTRA_PATH]);
@@ -203,6 +207,73 @@ class KeepAwake {
 }
 
 export const keepAwake = new KeepAwake();
+
+const PMSET = '/usr/bin/pmset';
+
+/**
+ * Keeping the Mac awake with the lid shut.
+ *
+ * `caffeinate` does not cover this: closing the lid is its own event, and only
+ * `pmset -c disablesleep` suppresses it. That needs root, which is why this is
+ * a separate switch — scripts/allow-lid-control.sh grants exactly the two
+ * commands below, once, and then it can be toggled from anywhere.
+ */
+export const closedLid = {
+  async state() {
+    if (process.platform !== 'darwin') {
+      return { supported: false, active: false, permitted: false };
+    }
+
+    let active = false;
+    try {
+      const { stdout } = await exec(`${PMSET} -g`, { env: shellEnv(), timeout: 5000 });
+      active = /SleepDisabled\s+1/.test(stdout);
+    } catch {
+      /* reading the setting never needs privileges; treat a failure as off */
+    }
+
+    // `sudo -n` fails rather than prompting, which is how a daemon asks
+    // "may I?" without hanging on a password nobody is there to type.
+    let permitted = false;
+    try {
+      await exec(`sudo -n ${PMSET} -c disablesleep ${active ? 1 : 0}`, {
+        env: shellEnv(),
+        timeout: 5000,
+      });
+      permitted = true;
+    } catch {
+      permitted = false;
+    }
+
+    return {
+      supported: true,
+      active,
+      permitted,
+      description:
+        'Keeps the Mac running with the lid closed while it is plugged in. On battery it sleeps as usual.',
+      setupCommand: LID_SETUP_COMMAND,
+    };
+  },
+
+  async set(enabled) {
+    if (process.platform !== 'darwin') {
+      throw Object.assign(new Error('Closed-lid mode is macOS-only.'), { status: 400 });
+    }
+    try {
+      await exec(`sudo -n ${PMSET} -c disablesleep ${enabled ? 1 : 0}`, {
+        env: shellEnv(),
+        timeout: 8000,
+      });
+    } catch {
+      throw Object.assign(
+        new Error('This Mac has not granted permission for closed-lid mode yet.'),
+        { status: 403 },
+      );
+    }
+    log.info(`closed-lid mode ${enabled ? 'on' : 'off'}`);
+    return this.state();
+  },
+};
 
 /** Directories worth offering as a project root, so the picker starts useful. */
 export function suggestedRoots() {
