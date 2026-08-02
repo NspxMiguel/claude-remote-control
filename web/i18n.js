@@ -1,0 +1,220 @@
+/**
+ * Two languages, no build step.
+ *
+ * Static markup carries `data-i18n` (and `-placeholder`, `-aria`, `-title`)
+ * and gets filled in on boot; strings built in JS go through `t()`. A missing
+ * key falls back to English rather than rendering a key name at someone, and
+ * English itself is the source text, so an untranslated string is still a
+ * sentence.
+ */
+
+const STORAGE_KEY = 'crc.lang';
+
+export const LANGUAGES = [
+  { id: 'auto', label: 'Automatic' },
+  { id: 'en', label: 'English' },
+  { id: 'pt', label: 'Português' },
+];
+
+const DICTIONARY = {
+  pt: {
+    // --- pairing ---
+    'gate.title': 'Sua máquina, no bolso',
+    'gate.sub': 'Pareie este aparelho para controlar o Claude no seu Mac.',
+    'gate.scan': 'Escanear o QR code',
+    'gate.photo': 'Tirar foto do código',
+    'gate.scanNote': 'Abre a câmera. Aponte para o código no seu Mac.',
+    'gate.or': 'ou digite o código',
+    'gate.codeLabel': 'Código de pareamento ou token',
+    'gate.nameLabel': 'Nome do aparelho',
+    'gate.pair': 'Parear aparelho',
+    'gate.hint':
+      'O código está na barra de menu do seu Mac: clique em >_ ▸ Show pairing code. Ele dura dez minutos.',
+    'scan.title': 'Aponte para o código',
+    'scan.hold': 'Segure o código de frente, preenchendo o quadro.',
+    'scan.got': 'Peguei.',
+
+    // --- shell ---
+    'app.noSession': 'Nenhuma sessão',
+    'app.newSession': 'Nova sessão',
+    'app.live': 'Ao vivo',
+    'app.onThisMachine': 'Nesta máquina',
+    'app.mirrorNote': 'Sessões do Claude Desktop e do CLI. Acompanhe e assuma quando quiser.',
+    'app.noLive': 'Nenhuma sessão rodando. Comece uma acima.',
+    'app.settings': 'Ajustes e aparelhos',
+    'app.empty.title': 'Sua máquina, no bolso',
+    'app.empty.sub': 'Comece uma sessão para rodar comandos, editar arquivos e ver o que o Claude faz.',
+    'app.composer.placeholder': 'Falar com {agent}…',
+    'app.composer.start': 'Comece uma sessão para escrever',
+    'app.composer.readOnly': 'Espelho somente leitura',
+    'app.stop': 'Parar',
+    'app.working': '{agent} está trabalhando…',
+    'toast.readOnly': 'Este é um espelho somente leitura. Use “Assumir daqui” para continuar.',
+    'app.jumpToLatest': 'Ir para o final ↓',
+
+    // --- openers ---
+    'openers.tour': 'O que é este projeto?',
+    'openers.recent': 'O que mudou?',
+    'openers.broken': 'Está quebrado?',
+    'openers.next': 'O que faço agora?',
+
+    // --- session sheet ---
+    'session.title': 'Sessão',
+    'session.mirrored': 'Conversa espelhada',
+    'session.folder': 'Pasta',
+    'session.agent': 'Agente',
+    'session.model': 'Modelo',
+    'session.id': 'Id da sessão',
+    'session.cost': 'Custo até agora',
+    'session.controls': 'Controles',
+    'session.permissions': 'Permissões',
+    'session.takeover': 'Assumir daqui',
+    'session.end': 'Encerrar sessão',
+    'session.stopMirroring': 'Parar de espelhar',
+    'session.mirrorExplain':
+      'Esta é uma cópia ao vivo de uma conversa rodando em outro lugar no seu Mac. Assumir cria uma sessão sua a partir daqui, sem mexer na original.',
+
+    // --- permissions ---
+    'perm.needed': 'Precisa de permissão',
+    'perm.allow': 'Permitir uma vez',
+    'perm.always': 'Permitir sempre',
+    'perm.deny': 'Negar',
+    'perm.ask': 'Perguntar',
+    'perm.acceptEdits': 'Aceitar edições',
+    'perm.plan': 'Só planejar',
+    'perm.bypass': 'Ignorar tudo',
+
+    // --- settings ---
+    'settings.title': 'Ajustes',
+    'settings.permissions': 'Permissões',
+    'settings.neverAsk': 'Nunca pedir permissão',
+    'settings.neverAskOn': 'Nada chega nesta tela',
+    'settings.neverAskOff': 'Toda ferramenta espera você',
+    'settings.voice': 'Voz',
+    'settings.readAloud': 'Ler respostas em voz alta',
+    'settings.readAloudNote': 'Pula código, caminhos e links',
+    'settings.dictation': 'Ditado',
+    'settings.dictationOk': 'segure o microfone e fale',
+    'settings.dictationOff': 'indisponível aqui',
+    'settings.language': 'Idioma',
+    'settings.thisMac': 'Este Mac',
+    'settings.sleep': 'Suspensão',
+    'settings.keepAwake': 'Manter este Mac acordado',
+    'settings.lidClosed': 'Rodar com a tampa fechada',
+    'settings.projectFolder': 'Pasta de projetos',
+    'settings.chooseFolder': 'Escolher uma pasta',
+    'settings.anywhere': 'Qualquer lugar deste Mac',
+    'settings.browse': 'Procurar',
+    'settings.reachableAt': 'Acessível em',
+    'settings.devices': 'Aparelhos pareados ({count})',
+    'settings.agents': 'Contas dos agentes',
+    'settings.pairAnother': 'Parear outro aparelho',
+    'settings.notifications': 'Ativar alertas de permissão',
+    'settings.unpair': 'Desparear este aparelho',
+    'settings.testedOn': 'Testado em',
+    'settings.testedNote': 'Simuladores, não aparelhos',
+    'settings.testedNoteSub': 'WebKit real, aparelho virtual',
+    'toast.notConnected': 'Sem conexão — aguarde, reconectando.',
+    'conn.connecting': 'Reconectando…',
+    'conn.offline': 'Sem conexão. Toque para tentar de novo.',
+    'app.mirrorNotice': 'Espelhando uma sessão que roda em outro lugar. Use “Assumir daqui” para continuar aqui.',
+
+    // --- shared verbs ---
+    'action.copy': 'Copiar',
+    'action.copied': 'Copiado',
+    'action.failed': 'Falhou',
+    'action.revoke': 'Revogar',
+    'action.install': 'Instalar',
+    'action.openTerminal': 'Abrir Terminal',
+    'action.grant': 'Conceder',
+    'action.turnOn': 'Ligar',
+    'action.turnOff': 'Desligar',
+    'action.useFolder': 'Usar esta pasta',
+    'action.tryAgain': 'Tentar este endereço de novo',
+    'action.notNow': 'Agora não',
+    'action.install2': 'Instalar',
+    'action.close': 'Fechar',
+    'action.retry': 'Tentar de novo',
+
+    // --- offline / install ---
+    'offline.title': 'Não consigo achar seu Mac',
+    'offline.detail':
+      'Este endereço não responde. Normalmente é o Mac dormindo, ou este celular numa rede diferente da de antes.',
+    'offline.tryAnother': 'Tentar outro endereço',
+    'offline.needsTailscale': 'O endereço 100.x e o nome da máquina precisam do Tailscale ligado aqui.',
+    'install.title': 'Deixe a um toque',
+    'install.sub':
+      'Instalado, ele abre em tela cheia direto da sua tela de início — sem endereço para lembrar, sem barra de navegador.',
+
+    // --- toasts ---
+    'toast.folderSet': 'Sessões novas começam em {path}',
+    'toast.deviceRevoked': 'Aparelho revogado',
+    'toast.nothingAsks': 'Nada vai perguntar{scope}',
+    'toast.asksAgain': 'Perguntando de novo{scope}',
+    'toast.noCodeInPhoto':
+      'Nenhum código nessa foto. Chegue mais perto, preencha o quadro e mantenha o celular de frente.',
+    'toast.notOurCode': 'Isso não é um código de pareamento deste app.',
+    'toast.allCode': 'Não há o que ler aqui — é tudo código.',
+  },
+};
+
+let current = 'en';
+
+/** Which language to actually use, resolving `auto` against the browser. */
+export function resolveLanguage(choice) {
+  const wanted = choice || localStorage.getItem(STORAGE_KEY) || 'auto';
+  if (wanted === 'en') return 'en';
+  if (wanted !== 'auto') return DICTIONARY[wanted] ? wanted : 'en';
+  const browser = (navigator.language || 'en').toLowerCase();
+  return browser.startsWith('pt') ? 'pt' : 'en';
+}
+
+export const language = () => current;
+export const languageChoice = () => localStorage.getItem(STORAGE_KEY) || 'auto';
+
+export function setLanguage(choice) {
+  localStorage.setItem(STORAGE_KEY, choice);
+  current = resolveLanguage(choice);
+  document.documentElement.lang = current === 'pt' ? 'pt-BR' : 'en';
+  applyStaticText();
+  return current;
+}
+
+/**
+ * Translate. `fallback` is the English source text, so a key with no entry
+ * still renders a sentence instead of `settings.neverAsk`.
+ */
+export function t(key, fallback, vars) {
+  const table = DICTIONARY[current];
+  let text = (table && table[key]) || fallback || key;
+  if (vars) {
+    for (const [name, value] of Object.entries(vars)) {
+      text = text.replaceAll(`{${name}}`, String(value));
+    }
+  }
+  return text;
+}
+
+/** Fill in everything marked up in the HTML. Safe to run repeatedly. */
+export function applyStaticText(root = document) {
+  for (const node of root.querySelectorAll('[data-i18n]')) {
+    // The English already in the markup is the fallback, so nothing is lost
+    // when a key is missing from a dictionary.
+    node.dataset.i18nSource ||= node.textContent.trim();
+    node.textContent = t(node.dataset.i18n, node.dataset.i18nSource);
+  }
+  for (const [attribute, dataKey] of [
+    ['placeholder', 'i18nPlaceholder'],
+    ['aria-label', 'i18nAria'],
+    ['title', 'i18nTitle'],
+  ]) {
+    for (const node of root.querySelectorAll(`[data-${dataKey.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}]`)) {
+      const key = node.dataset[dataKey];
+      const sourceKey = `${dataKey}Source`;
+      node.dataset[sourceKey] ||= node.getAttribute(attribute) || '';
+      node.setAttribute(attribute, t(key, node.dataset[sourceKey]));
+    }
+  }
+}
+
+current = resolveLanguage();

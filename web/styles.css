@@ -1556,3 +1556,42 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .speak-btn:hover { color: var(--text-dim); background: var(--surface); }
 .speak-btn.speaking { color: var(--accent); background: var(--accent-dim, var(--surface)); }
 .speak-btn.speaking svg { animation: pulse 1.4s ease-in-out infinite; }
+
+
+/* The round + is absolutely positioned at the drawer's top right, which is
+ * exactly where the close button sat — they overlapped by 36 of 40px on a
+ * phone. The scrim already dismisses the drawer, so below the desktop
+ * breakpoint the close button is redundant; the gear takes its place.
+ */
+@media (max-width: 899px) {
+  #drawer-close { display: none; }
+}
+
+/* A sentence does not fit in a 38px pill. The mirror notice wraps above the
+ * composer row instead of clipping off the right edge of the screen.
+ */
+.composer-notice {
+  margin: 0 var(--s2) var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: var(--t-meta);
+  line-height: 1.45;
+}
+
+
+/* Connection state, on the screen you are actually looking at. */
+.conn-banner {
+  width: calc(100% - var(--s4));
+  margin: 0 var(--s2) var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: var(--t-meta);
+  text-align: center;
+}
+.conn-banner.connecting { color: var(--warn); }
+.conn-banner.down, .conn-banner.offline { color: var(--danger); border-color: var(--danger); }

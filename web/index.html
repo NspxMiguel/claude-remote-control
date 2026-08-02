@@ -25,24 +25,24 @@
         <path d="M12.5 18h7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
       </svg>
       <div>
-        <h1>Your machine, in your pocket</h1>
-        <p class="muted">Pair this device to drive Claude on your Mac.</p>
+        <h1 data-i18n="gate.title">Your machine, in your pocket</h1>
+        <p class="muted" data-i18n="gate.sub">Pair this device to drive Claude on your Mac.</p>
       </div>
     </div>
 
-    <button id="scan-open" type="button" class="primary wide">Scan the QR code</button>
+    <button id="scan-open" type="button" class="primary wide" data-i18n="gate.scan">Scan the QR code</button>
     <p id="scan-note" class="hint"></p>
     <input id="scan-file" type="file" accept="image/*" capture="environment" hidden />
 
-    <div class="gate-or"><span>or type the code</span></div>
+    <div class="gate-or"><span data-i18n="gate.or">or type the code</span></div>
 
     <form id="pair-form">
-      <label for="pair-input">Pairing code or master token</label>
+      <label for="pair-input" data-i18n="gate.codeLabel">Pairing code or master token</label>
       <input id="pair-input" type="text" inputmode="numeric" autocomplete="one-time-code"
              placeholder="123456" spellcheck="false" required />
-      <label for="pair-name">Device name</label>
+      <label for="pair-name" data-i18n="gate.nameLabel">Device name</label>
       <input id="pair-name" type="text" placeholder="iPhone" spellcheck="false" />
-      <button type="submit" class="primary wide">Pair device</button>
+      <button type="submit" class="primary wide" data-i18n="gate.pair">Pair device</button>
       <p id="pair-error" class="error" hidden></p>
     </form>
     <p class="hint">The code is in the menu bar on your Mac: click <code>&gt;_</code> ▸ <strong>Show pairing code</strong>. It lasts ten minutes. No menu bar app? Run <code>crc pair</code> in a terminal.</p>
@@ -53,14 +53,14 @@
 <div id="scan-sheet" class="sheet" hidden>
   <div class="sheet-card scan">
     <header class="sheet-head">
-      <h3>Point at the code</h3>
+      <h3 data-i18n="scan.title">Point at the code</h3>
       <button id="scan-close" class="icon-btn" aria-label="Close" data-icon="close"></button>
     </header>
     <div class="scan-frame">
       <video id="scan-video" playsinline muted></video>
       <div class="scan-reticle" aria-hidden="true"></div>
     </div>
-    <p id="scan-status" class="muted small center">Hold the code square on, filling the frame.</p>
+    <p id="scan-status" class="muted small center" data-i18n="scan.hold">Hold the code square on, filling the frame.</p>
   </div>
 </div>
 
@@ -68,13 +68,13 @@
 <div id="folder-sheet" class="sheet" hidden>
   <div class="sheet-card">
     <header class="sheet-head">
-      <h3>Project folder</h3>
+      <h3 data-i18n="settings.projectFolder">Project folder</h3>
       <button id="folder-close" class="icon-btn" aria-label="Close" data-icon="close"></button>
     </header>
     <p class="muted small">New sessions start here. Anything you pick is added to the folders this app is allowed to touch.</p>
     <div id="folder-path" class="picker-path"></div>
     <ul id="folder-list" class="picker-list"></ul>
-    <button id="folder-use" class="primary wide">Use this folder</button>
+    <button id="folder-use" class="primary wide" data-i18n="action.useFolder">Use this folder</button>
   </div>
 </div>
 
@@ -82,12 +82,12 @@
 <div id="offline-sheet" class="sheet" hidden>
   <div class="sheet-card">
     <header class="sheet-head">
-      <h3>Can't reach your Mac</h3>
+      <h3 data-i18n="offline.title">Can't reach your Mac</h3>
       <button id="offline-close" class="icon-btn" aria-label="Close" data-icon="close"></button>
     </header>
     <p id="offline-detail" class="muted small"></p>
     <div id="offline-addresses"></div>
-    <button id="offline-retry" class="primary wide">Try this address again</button>
+    <button id="offline-retry" class="primary wide" data-i18n="action.tryAgain">Try this address again</button>
   </div>
 </div>
 
@@ -95,13 +95,13 @@
 <div id="install-sheet" class="sheet" hidden>
   <div class="sheet-card">
     <header class="sheet-head">
-      <h3>Keep it one tap away</h3>
+      <h3 data-i18n="install.title">Keep it one tap away</h3>
       <button id="install-close" class="icon-btn" aria-label="Close" data-icon="close"></button>
     </header>
     <p class="muted small">Installed, it opens full screen from your home screen — no address to remember, no browser bars.</p>
     <ol id="install-steps" class="install-steps"></ol>
     <button id="install-now" class="primary wide" hidden>Install</button>
-    <button id="install-later" class="ghost-btn wide">Not now</button>
+    <button id="install-later" class="ghost-btn wide" data-i18n="action.notNow">Not now</button>
   </div>
 </div>
 
@@ -121,25 +121,25 @@
       <button id="drawer-close" class="icon-btn" aria-label="Close menu" data-icon="close"></button>
     </header>
 
-    <button id="new-session" class="new-session" aria-label="New session">
+    <button id="new-session" class="new-session" aria-label="New session" data-i18n-aria="app.newSession">
       <span class="plus">+</span>
     </button>
 
     <nav class="session-groups">
       <section>
-        <h2>Live <span id="live-count" class="count">0</span></h2>
+        <h2><span data-i18n="app.live">Live</span> <span id="live-count" class="count">0</span></h2>
         <ul id="live-list" class="session-list"></ul>
-        <p id="live-empty" class="muted small">No sessions running. Start one above.</p>
+        <p id="live-empty" class="muted small" data-i18n="app.noLive">No sessions running. Start one above.</p>
       </section>
       <section>
-        <h2>On this machine</h2>
-        <p class="muted small">Sessions from Claude Desktop and the CLI. Watch live, then take over.</p>
+        <h2 data-i18n="app.onThisMachine">On this machine</h2>
+        <p class="muted small" data-i18n="app.mirrorNote">Sessions from Claude Desktop and the CLI. Watch live, then take over.</p>
         <ul id="mirror-list" class="session-list"></ul>
       </section>
     </nav>
 
     <footer class="drawer-foot">
-      <button id="open-settings" class="ghost-btn">Settings &amp; devices</button>
+      <button id="open-settings" class="ghost-btn" data-i18n="app.settings">Settings &amp; devices</button>
       <span id="conn-state" class="conn"><i></i> connecting</span>
     </footer>
   </aside>
@@ -151,7 +151,7 @@
         <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
       </button>
       <div class="topbar-title">
-        <strong id="session-title">No session</strong>
+        <strong id="session-title" data-i18n="app.noSession">No session</strong>
         <span id="session-sub" class="muted small"></span>
       </div>
       <button id="session-menu-btn" class="icon-btn" aria-label="Session options">
@@ -165,21 +165,23 @@
           <path d="M4 6l5 6-5 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M12.5 18h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
-        <h2>Your machine, in your pocket</h2>
-        <p class="muted">Start a session to run commands, edit files and watch what Claude does.</p>
+        <h2 data-i18n="app.empty.title">Your machine, in your pocket</h2>
+        <p class="muted" data-i18n="app.empty.sub">Start a session to run commands, edit files and watch what Claude does.</p>
       </div>
     </div>
 
     <div id="scroll-pin" class="scroll-pin" hidden>
-      <button id="scroll-bottom">Jump to latest ↓</button>
+      <button id="scroll-bottom" data-i18n="app.jumpToLatest">Jump to latest ↓</button>
     </div>
 
     <form id="composer" class="composer">
+      <button id="conn-banner" type="button" class="conn-banner" hidden></button>
+      <p id="composer-notice" class="composer-notice" hidden></p>
       <div id="suggestions" class="suggestions" hidden></div>
       <div id="attachments" class="attachments" hidden></div>
       <div class="composer-row">
         <input id="file-input" type="file" accept="image/*" multiple hidden />
-        <textarea id="input" rows="1" placeholder="Message Claude…" enterkeyhint="send"></textarea>
+        <textarea id="input" rows="1" placeholder="Message Claude…" data-i18n-placeholder="app.composer.placeholder" enterkeyhint="send"></textarea>
         <button id="attach" type="button" class="attach-btn" aria-label="Attach image">
           <svg viewBox="0 0 24 24" width="20" height="20"><path d="M21 11.5l-8.8 8.8a5 5 0 01-7.1-7.1l9-9a3.4 3.4 0 014.8 4.8l-9 9a1.8 1.8 0 01-2.5-2.5l8.3-8.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -201,7 +203,7 @@
 <div id="perm-sheet" class="sheet" hidden>
   <div class="sheet-card perm">
     <div class="perm-head">
-      <span class="perm-badge">Permission needed</span>
+      <span class="perm-badge" data-i18n="perm.needed">Permission needed</span>
       <h3 id="perm-title">Tool</h3>
       <p id="perm-sub" class="muted small"></p>
     </div>
@@ -209,9 +211,9 @@
     <div id="perm-rich" class="perm-rich assistant" hidden></div>
     <p id="perm-desc" class="muted small"></p>
     <div class="perm-actions">
-      <button id="perm-deny" class="danger">Deny</button>
-      <button id="perm-allow-always" class="ghost-btn">Always allow</button>
-      <button id="perm-allow" class="primary">Allow once</button>
+      <button id="perm-deny" class="danger" data-i18n="perm.deny">Deny</button>
+      <button id="perm-allow-always" class="ghost-btn" data-i18n="perm.always">Always allow</button>
+      <button id="perm-allow" class="primary" data-i18n="perm.allow">Allow once</button>
     </div>
     <p id="perm-queue" class="muted small center"></p>
   </div>
@@ -260,23 +262,21 @@
 <div id="opts-sheet" class="sheet" hidden>
   <div class="sheet-card">
     <header class="sheet-head">
-      <h3>Session</h3>
+      <h3 data-i18n="session.title">Session</h3>
       <button class="icon-btn sheet-close" aria-label="Close" data-icon="close"></button>
     </header>
-    <div id="opts-info" class="kv"></div>
-    <label for="opt-model">Model</label>
-    <select id="opt-model"></select>
-    <label for="opt-perm">Permission mode</label>
-    <select id="opt-perm">
+    <div id="opts-body"></div>
+    <select id="opt-model" hidden></select>
+    <select id="opt-perm" hidden>
       <option value="default">Ask me</option>
       <option value="acceptEdits">Auto-accept edits</option>
       <option value="plan">Plan only</option>
       <option value="bypassPermissions">Bypass all (dangerous)</option>
     </select>
     <div class="opts-actions">
-      <button id="opt-settings" class="ghost-btn">Settings &amp; devices</button>
-      <button id="opt-takeover" class="ghost-btn" hidden>Take over from here</button>
-      <button id="opt-close-session" class="danger">End session</button>
+      <button id="opt-settings" class="ghost-btn" data-i18n="app.settings">Settings &amp; devices</button>
+      <button id="opt-takeover" class="ghost-btn" data-i18n="session.takeover" hidden>Take over from here</button>
+      <button id="opt-close-session" class="danger" data-i18n="session.end">End session</button>
     </div>
   </div>
 </div>
@@ -285,17 +285,17 @@
 <div id="settings-sheet" class="sheet" hidden>
   <div class="sheet-card">
     <header class="sheet-head">
-      <h3>Settings</h3>
+      <h3 data-i18n="settings.title">Settings</h3>
       <button class="icon-btn sheet-close" aria-label="Close" data-icon="close"></button>
     </header>
     <div id="perms-body"></div>
     <div id="setup-body"></div>
     <div id="settings-body"></div>
     <div id="agents-body"></div>
-    <button id="pair-another" class="ghost-btn wide">Pair another device</button>
+    <button id="pair-another" class="ghost-btn wide" data-i18n="settings.pairAnother">Pair another device</button>
     <p id="pair-code" class="pair-code" hidden></p>
-    <button id="enable-notifs" class="ghost-btn wide">Enable permission alerts</button>
-    <button id="unpair" class="danger wide">Unpair this device</button>
+    <button id="enable-notifs" class="ghost-btn wide" data-i18n="settings.notifications">Enable permission alerts</button>
+    <button id="unpair" class="danger wide" data-i18n="settings.unpair">Unpair this device</button>
   </div>
 </div>
 

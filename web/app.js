@@ -1,6 +1,7 @@
 /* Claude Remote Control — PWA client. No framework, no build step. */
 
 import { el, $ } from './dom.js';
+import { applyStaticText, LANGUAGES, languageChoice, setLanguage, t } from './i18n.js';
 import { icon } from './icons.js';
 import { renderMarkdown } from './markdown.js';
 import {
@@ -31,6 +32,8 @@ const state = {
   serverState: null,
   /** Images staged for the next message: { mediaType, data, url, name }. */
   pending: [],
+  /** The last message sent, kept until the daemon accepts it. */
+  lastDraft: null,
   /** Read every finished reply aloud, for when the phone is not in your hand. */
   narrate: localStorage.getItem(NARRATE_KEY) === '1',
 };
@@ -228,7 +231,11 @@ window.addEventListener('beforeinstallprompt', (event) => {
 
 function installSteps() {
   const ua = navigator.userAgent;
-  if (/iPhone|iPad|iPod/.test(ua)) {
+  // An iPad in its default desktop mode calls itself a Macintosh; the only
+  // tell is that Macs do not have touch. Without this the iPad was handed
+  // "open the browser menu", which is not where Add to Home Screen lives.
+  const iPadAsDesktop = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+  if (/iPhone|iPad|iPod/.test(ua) || iPadAsDesktop) {
     return [
       'Tap the Share button at the bottom of the screen.',
       'Scroll down and choose "Add to Home Screen".',
@@ -296,13 +303,14 @@ async function enterApp({ paired = true } = {}) {
   if (paired) offerInstall();
 }
 
-function wireScanner() {
-  const closeScanner = () => {
-    stopCamera?.();
-    stopCamera = null;
-    $('#scan-sheet').hidden = true;
-  };
+/** Close the scanner and release the camera. Every dismissal must go here. */
+function closeScanner() {
+  stopCamera?.();
+  stopCamera = null;
+  $('#scan-sheet').hidden = true;
+}
 
+function wireScanner() {
   $('#scan-close').addEventListener('click', closeScanner);
 
   $('#scan-open').addEventListener('click', async () => {
@@ -433,6 +441,10 @@ function handleServerMessage(msg) {
       for (const s of msg.sessions) state.sessions.set(s.id, s);
       renderSessionList();
       noticeIfSessionVanished();
+      // A prompt raised while this phone was asleep only ever arrived as a
+      // live broadcast, so reconnecting left the agent blocked on a question
+      // nothing on screen was asking. Pick them up from the session state.
+      rehydratePermissions(msg.sessions);
       break;
 
     case 'sessions': {
@@ -473,6 +485,9 @@ function handleServerMessage(msg) {
       break;
 
     case 'error':
+      // The daemon refused the message the socket had already carried; give
+      // the typing and the attachments back rather than losing them.
+      restoreDraft();
       toast(msg.message);
       break;
   }
@@ -505,6 +520,21 @@ function setConn(status) {
   const node = $('#conn-state');
   node.className = `conn ${status}`;
   node.lastChild.textContent = ` ${status}`;
+
+  // That indicator lives in the drawer footer, which is off-canvas on a phone —
+  // so a dead socket looked exactly like a quiet one until you pressed Send.
+  // This says so where you are, and offers the retry the backoff would
+  // eventually make on its own.
+  const banner = $('#conn-banner');
+  const down = status !== 'online';
+  banner.hidden = !down;
+  banner.className = `conn-banner ${status}`;
+  if (down) {
+    banner.textContent =
+      status === 'connecting'
+        ? t('conn.connecting', 'Reconnecting…')
+        : t('conn.offline', 'Not connected. Tap to try again.');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -610,10 +640,10 @@ function applyItems(sessionId, items) {
  * conversation has anything in it.
  */
 const OPENERS = [
-  { label: 'What is this project?', text: 'Give me a short tour of this project: what it is, how it is laid out, and how to run it.' },
-  { label: 'What changed recently?', text: 'Summarise the recent git history and what state the working tree is in.' },
-  { label: 'Anything broken?', text: 'Run the test suite and tell me briefly whether anything fails.' },
-  { label: 'What should I do next?', text: 'Look for TODOs, failing tests and obvious loose ends, then suggest what to pick up next.' },
+  { key: 'openers.tour', label: 'What is this project?', text: 'Give me a short tour of this project: what it is, how it is laid out, and how to run it.' },
+  { key: 'openers.recent', label: 'What changed recently?', text: 'Summarise the recent git history and what state the working tree is in.' },
+  { key: 'openers.broken', label: 'Anything broken?', text: 'Run the test suite and tell me briefly whether anything fails.' },
+  { key: 'openers.next', label: 'What should I do next?', text: 'Look for TODOs, failing tests and obvious loose ends, then suggest what to pick up next.' },
 ];
 
 function renderSuggestions() {
@@ -631,7 +661,7 @@ function renderSuggestions() {
   container.innerHTML = '';
   container.dataset.filled = session.id;
   for (const opener of OPENERS) {
-    const chip = el('button', 'suggestion', opener.label);
+    const chip = el('button', 'suggestion', t(opener.key, opener.label));
     chip.type = 'button';
     chip.addEventListener('click', () => {
       const input = $('#input');
@@ -888,10 +918,10 @@ function renderHeader() {
   const session = currentSession();
   if (!session) {
     $('#app').dataset.agent = '';
-    $('#session-title').textContent = 'No session';
+    $('#session-title').textContent = t('app.noSession', 'No session');
     $('#session-sub').textContent = '';
     $('#composer-meta').innerHTML = '';
-    setComposerEnabled(false, 'Start a session to begin');
+    setComposerEnabled(false, t('app.composer.start', 'Start a session to begin'));
     return;
   }
 
@@ -905,20 +935,31 @@ function renderHeader() {
   // Only name the agent when it is not the default, to keep the line short.
   if (session.agent && session.agent !== 'claude-code') bits.push(session.agentLabel || session.agent);
   if (session.model) bits.push(session.model.replace(/^claude-/, ''));
-  if (session.readOnly) bits.push('read-only mirror');
+  if (session.readOnly) bits.push(t('app.composer.readOnly', 'read-only mirror'));
   $('#session-sub').textContent = bits.join(' · ');
 
   const busy = session.status === 'busy';
   $('#send').hidden = busy;
   $('#stop').hidden = !busy;
 
+  // A whole sentence does not fit in the composer's chip: it clipped off the
+  // right edge and pushed the row an extra line tall. Long-form goes above.
+  const notice = $('#composer-notice');
+  notice.hidden = !session.readOnly;
+  if (session.readOnly) {
+    notice.textContent = t(
+      'app.mirrorNotice',
+      'Mirroring a session running elsewhere. Open “Take over” to continue it here.',
+    );
+  }
+
   const meta = $('#composer-meta');
   meta.innerHTML = '';
   if (session.readOnly) {
-    meta.appendChild(el('span', null, 'Mirroring a desktop session — open “Take over” to continue it here.'));
+    // the notice above says it
   } else if (busy) {
     meta.appendChild(el('span', 'spinner'));
-    meta.appendChild(el('span', null, `${session.agentLabel || 'Claude'} is working…`));
+    meta.appendChild(el('span', null, t('app.working', '{agent} is working…', { agent: session.agentLabel || 'Claude' })));
   } else if (typeof session.totalCostUsd === 'number' && session.totalCostUsd > 0) {
     meta.appendChild(el('span', null, `$${session.totalCostUsd.toFixed(4)} this session`));
   }
@@ -942,7 +983,9 @@ function setComposerEnabled(enabled, disabledHint = 'Read-only mirror', agentLab
   $('#input').disabled = !enabled;
   $('#send').disabled = !enabled;
   $('#dictate').disabled = !enabled;
-  $('#input').placeholder = enabled ? `Message ${agentLabel || 'Claude'}…` : disabledHint;
+  $('#input').placeholder = enabled
+    ? t('app.composer.placeholder', 'Message {agent}…', { agent: agentLabel || 'Claude' })
+    : disabledHint;
 }
 
 // ---------------------------------------------------------------------------
@@ -1032,6 +1075,41 @@ function maybeAutoNarrate(text) {
 // Permissions
 // ---------------------------------------------------------------------------
 
+/**
+ * Recover prompts raised while this device was not listening.
+ *
+ * The daemon already ships the full request payload on every session it
+ * describes; the client only ever read the live broadcast, so a phone that
+ * slept through the question came back to a screen with nothing on it and an
+ * agent waiting out its ten-minute timeout.
+ */
+function rehydratePermissions(sessions = []) {
+  let recovered = 0;
+  for (const session of sessions) {
+    for (const payload of session.pendingPermissions || []) {
+      if (state.permQueue.some((p) => p.requestId === payload.requestId)) continue;
+      state.permQueue.push(payload);
+      recovered += 1;
+    }
+  }
+  if (!recovered) return;
+  updateTabTitle();
+  if ($('#perm-sheet').hidden) showNextPermission();
+}
+
+/** Put a rejected message back in the composer, exactly as it was. */
+function restoreDraft() {
+  const draft = state.lastDraft;
+  if (!draft) return;
+  state.lastDraft = null;
+  const input = $('#input');
+  if (input.value.trim()) return; // something newer is being typed; leave it
+  input.value = draft.text;
+  state.pending = draft.pending || [];
+  renderAttachments();
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function queuePermission(payload) {
   if (state.permQueue.some((p) => p.requestId === payload.requestId)) return;
   state.permQueue.push(payload);
@@ -1088,7 +1166,13 @@ function decide(decision) {
   const sessionId = sheet.dataset.sessionId;
   if (!requestId) return;
 
-  send({ t: 'permission', sessionId, requestId, decision });
+  // A phone that just woke up has a prompt on screen and a socket that has not
+  // reconnected yet. Dropping the answer and closing the sheet as if it had
+  // been sent is how a tool sits denied ten minutes later for no reason.
+  if (!send({ t: 'permission', sessionId, requestId, decision })) {
+    toast(t('toast.notConnected', 'Not connected — hold on, reconnecting.'));
+    return;
+  }
   state.permQueue = state.permQueue.filter((p) => p.requestId !== requestId);
   showNextPermission();
 }
@@ -1273,7 +1357,7 @@ function renderAgentSettings(agents) {
   container.innerHTML = '';
   if (!agents.length) return;
 
-  const { section, card } = group('Agent accounts');
+  const { section, card } = group(t('settings.agents', 'Agent accounts'));
   card.classList.add('boxed');
 
   for (const agent of agents) {
@@ -1357,6 +1441,35 @@ function renderAgentSettings(agents) {
   }
 
   container.appendChild(section);
+}
+
+/**
+ * Fill the agent picker from what is actually installed.
+ *
+ * Restored after a refactor deleted it and left the call behind: the new
+ * session sheet threw on open, so the agent list and the folder browser were
+ * both empty and Start posted undefined for each.
+ */
+function renderAgentPicker() {
+  const select = $('#new-agent');
+  const agents = state.serverState?.agents || [];
+  select.innerHTML = '';
+
+  for (const agent of agents) {
+    const option = document.createElement('option');
+    option.value = agent.id;
+    // Say why it is unusable — "not signed in" and "not installed" have very
+    // different fixes, and the option label is where you notice the difference.
+    option.textContent = agent.available ? agent.label : `${agent.label} — ${agent.detail || 'unavailable'}`;
+    option.disabled = !agent.available;
+    select.appendChild(option);
+  }
+
+  const firstAvailable = agents.find((a) => a.available);
+  if (firstAvailable) select.value = firstAvailable.id;
+  select.parentElement.querySelector('label[for=new-agent]').hidden = agents.length < 2;
+  select.hidden = agents.length < 2;
+  renderAgentNote();
 }
 
 /** Say plainly what the chosen agent cannot do, instead of silent surprises. */
@@ -1464,7 +1577,7 @@ async function renderSetup() {
   }
 
   // --- what this Mac has installed -------------------------------------------
-  const machine = group('This Mac');
+  const machine = group(t('settings.thisMac', 'This Mac'));
 
   for (const task of data.tasks) {
     const extras = [];
@@ -1531,14 +1644,14 @@ async function renderSetup() {
   container.appendChild(machine.section);
 
   // --- sleep ------------------------------------------------------------------
-  const sleep = group('Sleep');
+  const sleep = group(t('settings.sleep', 'Sleep'));
 
   // Keep awake — what people install Amphetamine for.
   if (data.keepAwake?.supported) {
     sleep.card.appendChild(
       row({
         dot: data.keepAwake.active ? 'idle' : '',
-        name: 'Keep this Mac awake',
+        name: t('settings.keepAwake', 'Keep this Mac awake'),
         detail: data.keepAwake.description,
         control: toggle(data.keepAwake.active, async (wanted, input) => {
           try {
@@ -1565,7 +1678,7 @@ async function renderSetup() {
           // `wanted` is the switch; `active` is whether it is in force right
           // now, which on battery it deliberately is not.
           dot: data.closedLid.active ? 'idle' : '',
-          name: 'Run with the lid closed',
+          name: t('settings.lidClosed', 'Run with the lid closed'),
           detail: data.closedLid.status || data.closedLid.description,
           control: toggle(data.closedLid.wanted, async (wanted, input) => {
             try {
@@ -1585,7 +1698,7 @@ async function renderSetup() {
       sleep.card.appendChild(
         row({
           dot: '',
-          name: 'Run with the lid closed',
+          name: t('settings.lidClosed', 'Run with the lid closed'),
           detail: 'needs permission once',
           control: action('Grant', async () => {
             try {
@@ -1611,12 +1724,12 @@ async function renderSetup() {
   if (sleep.card.children.length) container.appendChild(sleep.section);
 
   // --- where new sessions start -----------------------------------------------
-  const folder = group('Project folder', prettyPath(data.defaultCwd));
+  const folder = group(t('settings.projectFolder', 'Project folder'), prettyPath(data.defaultCwd));
   folder.card.appendChild(
     row({
-      name: 'Choose a folder',
-      detail: 'Anywhere on this Mac',
-      control: action('Browse', () => openDefaultFolderPicker(data.defaultCwd)),
+      name: t('settings.chooseFolder', 'Choose a folder'),
+      detail: t('settings.anywhere', 'Anywhere on this Mac'),
+      control: action(t('settings.browse', 'Browse'), () => openDefaultFolderPicker(data.defaultCwd)),
     }),
   );
   const options = el('div', 'root-options');
@@ -1654,12 +1767,12 @@ function renderPermissions(defaults = {}) {
   container.innerHTML = '';
   const on = defaults.permissionMode === BYPASS_MODE;
 
-  const { section, card } = group('Permissions');
+  const { section, card } = group(t('settings.permissions', 'Permissions'));
   card.appendChild(
     row({
       dot: on ? 'error' : 'idle',
-      name: 'Never ask for permission',
-      detail: on ? 'Nothing reaches this screen' : 'Every tool waits for you',
+      name: t('settings.neverAsk', 'Never ask for permission'),
+      detail: on ? t('settings.neverAskOn', 'Nothing reaches this screen') : t('settings.neverAskOff', 'Every tool waits for you'),
       control: toggle(on, async (wanted, input) => {
         input.disabled = true;
         try {
@@ -1698,13 +1811,13 @@ function renderPermissions(defaults = {}) {
 
 /** Reading replies aloud, and whether this browser can hear you at all. */
 function renderVoiceSettings(container) {
-  const { section, card } = group('Voice');
+  const { section, card } = group(t('settings.voice', 'Voice'));
 
   card.appendChild(
     row({
       dot: state.narrate ? 'idle' : '',
-      name: 'Read replies aloud',
-      detail: 'Skips code, paths and links',
+      name: t('settings.readAloud', 'Read replies aloud'),
+      detail: t('settings.readAloudNote', 'Skips code, paths and links'),
       control: toggle(state.narrate, async (wanted) => {
         state.narrate = wanted;
         localStorage.setItem(NARRATE_KEY, wanted ? '1' : '0');
@@ -1716,6 +1829,28 @@ function renderVoiceSettings(container) {
     }),
   );
 
+  // Language. `Automatic` follows the phone, which is what almost everyone
+  // wants; the explicit choices are for a phone set to one language and a
+  // person who thinks in another.
+  const picker = document.createElement('select');
+  for (const option of LANGUAGES) {
+    const node = document.createElement('option');
+    node.value = option.id;
+    node.textContent = option.label;
+    if (option.id === languageChoice()) node.selected = true;
+    picker.appendChild(node);
+  }
+  picker.addEventListener('change', () => {
+    setLanguage(picker.value);
+    // Redraw everything that was built in JS rather than markup.
+    openSettings();
+    renderHeader();
+    renderSessionList();
+  });
+  card.appendChild(
+    row({ name: t('settings.language', 'Language'), detail: null, control: picker }),
+  );
+
   // Dictation is a property of the browser, not a setting — but when it is
   // unavailable the microphone button needs to explain itself somewhere.
   loadVoice().then((voice) => {
@@ -1723,8 +1858,8 @@ function renderVoiceSettings(container) {
     card.appendChild(
       row({
         dot: obstacle ? '' : 'idle',
-        name: 'Dictation',
-        detail: obstacle ? 'unavailable here' : 'hold the microphone and talk',
+        name: t('settings.dictation', 'Dictation'),
+        detail: obstacle ? t('settings.dictationOff', 'unavailable here') : t('settings.dictationOk', 'hold the microphone and talk'),
         note: obstacle ? el('p', null, obstacle) : null,
       }),
     );
@@ -1741,8 +1876,6 @@ async function openSettings() {
     const data = await api('/api/state');
     state.serverState = data;
     renderPermissions(data.defaults);
-
-    body.appendChild(el('label', null, 'Reachable at'));
 
     // Listing a LAN address while bound to loopback would send you chasing an
     // address that cannot answer. Say what is actually true.
@@ -1762,7 +1895,7 @@ async function openSettings() {
     // --- addresses ------------------------------------------------------------
     const ts = data.tailscale;
     const addresses = group(
-      'Reachable at',
+      t('settings.reachableAt', 'Reachable at'),
       !ts
         ? 'Tailscale is not installed. Install it to reach this Mac from outside your network.'
         : ts.running
@@ -1777,8 +1910,8 @@ async function openSettings() {
       text.appendChild(el('span', null, u.label || u.kind));
       line.appendChild(text);
       line.appendChild(
-        action('Copy', async (button) => {
-          button.textContent = (await copyText(u.url)) ? 'Copied' : 'Failed';
+        action(t('action.copy', 'Copy'), async (button) => {
+          button.textContent = (await copyText(u.url)) ? t('action.copied', 'Copied') : t('action.failed', 'Failed');
           setTimeout(() => {
             button.textContent = 'Copy';
           }, 1600);
@@ -1790,13 +1923,13 @@ async function openSettings() {
 
     // --- paired devices -------------------------------------------------------
     if (data.devices?.length) {
-      const devices = group(`Paired devices (${data.devices.length})`);
+      const devices = group(t('settings.devices', `Paired devices (${data.devices.length})`, { count: data.devices.length }));
       for (const device of data.devices) {
         devices.card.appendChild(
           row({
             name: device.name,
             detail: `last seen ${relativeTime(Date.parse(device.lastSeenAt))}`,
-            control: action('Revoke', async () => {
+            control: action(t('action.revoke', 'Revoke'), async () => {
               await api(`/api/devices/${device.id}`, { method: 'DELETE' });
               toast('Device revoked');
               openSettings();
@@ -1817,56 +1950,137 @@ async function openSettings() {
     );
 
     renderAgentSettings(data.agents || []);
+    renderTestedOn(body);
   } catch (err) {
     body.appendChild(el('p', 'error', err.message));
   }
   $('#settings-sheet').hidden = false;
 }
 
+/** Turn a model id into something worth reading: claude-opus-5 → Opus 5. */
+function prettyModel(id) {
+  if (!id) return null;
+  const known = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
+  if (known[id]) return known[id];
+  return String(id)
+    .replace(/^claude-/, '')
+    .replace(/-\d{8}$/, '')
+    .split('-')
+    .map((part) => (/^\d+(\.\d+)?$/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(' ');
+}
+
+const PERMISSION_LABEL = {
+  default: 'Ask me',
+  acceptEdits: 'Auto-accept edits',
+  plan: 'Plan only',
+  bypassPermissions: 'Bypass all',
+};
+
+/**
+ * What this session is, and the few things you can do to it.
+ *
+ * Nothing here invents a value. A mirrored conversation has a model — the
+ * transcript names it on every reply — but no permission mode of ours, and
+ * showing a dropdown parked on the first entry told people their Opus session
+ * was Sonnet and set to "Ask me" when neither was true.
+ */
 function openSessionOptions() {
   const session = currentSession();
   if (!session) return;
 
-  const info = $('#opts-info');
-  info.innerHTML = '';
-  const rows = [
-    ['Directory', session.cwd || '—'],
-    ['Status', session.status],
-    ['Session id', (session.claudeSessionId || session.id).slice(0, 8)],
-  ];
-  if (session.origin) rows.push(['Started from', session.origin]);
-  if (typeof session.totalCostUsd === 'number') rows.push(['Cost', `$${session.totalCostUsd.toFixed(4)}`]);
-  for (const [k, v] of rows) {
-    const row = el('div');
-    row.appendChild(el('span', null, k));
-    row.appendChild(el('span', null, String(v)));
-    info.appendChild(row);
-  }
-
-  const modelSelect = $('#opt-model');
-  modelSelect.innerHTML = '';
-  const models = session.availableModels?.length
-    ? session.availableModels
-    : [
-        { id: 'sonnet', name: 'Sonnet' },
-        { id: 'opus', name: 'Opus' },
-        { id: 'haiku', name: 'Haiku' },
-      ];
-  for (const model of models) {
-    const opt = document.createElement('option');
-    opt.value = model.id;
-    opt.textContent = model.name;
-    if (session.model === model.id) opt.selected = true;
-    modelSelect.appendChild(opt);
-  }
-  $('#opt-perm').value = session.permissionMode || 'default';
-
+  const body = $('#opts-body');
+  body.innerHTML = '';
   const readOnly = Boolean(session.readOnly);
-  modelSelect.disabled = readOnly;
-  $('#opt-perm').disabled = readOnly;
+
+  // --- what it is -------------------------------------------------------------
+  const about = group(readOnly ? t('session.mirrored', 'Mirrored conversation') : t('session.title', 'Session'));
+
+  about.card.appendChild(
+    row({
+      name: t('session.folder', 'Folder'),
+      detail: prettyPath(session.cwd) || '—',
+      control: session.cwd
+        ? action(t('action.copy', 'Copy'), async (button) => {
+            button.textContent = (await copyText(session.cwd)) ? 'Copied' : 'Failed';
+            setTimeout(() => {
+              button.textContent = 'Copy';
+            }, 1600);
+          }, { neutral: true })
+        : null,
+    }),
+  );
+
+  const agentLabel = session.agentLabel || (session.agent === 'antigravity' ? 'Google Antigravity' : 'Claude Code');
+  about.card.appendChild(
+    row({ name: t('session.agent', 'Agent'), detail: readOnly ? `${agentLabel} · ${session.origin || 'unknown'}` : agentLabel }),
+  );
+
+  const model = prettyModel(session.model);
+  if (model) about.card.appendChild(row({ name: t('session.model', 'Model'), detail: model }));
+
+  about.card.appendChild(
+    row({
+      name: t('session.id', 'Session id'),
+      detail: (session.claudeSessionId || session.id).slice(0, 8),
+      control: action(t('action.copy', 'Copy'), async (button) => {
+        button.textContent = (await copyText(session.claudeSessionId || session.id)) ? 'Copied' : 'Failed';
+        setTimeout(() => {
+          button.textContent = 'Copy';
+        }, 1600);
+      }, { neutral: true }),
+    }),
+  );
+
+  if (typeof session.totalCostUsd === 'number' && session.totalCostUsd > 0) {
+    about.card.appendChild(row({ name: t('session.cost', 'Cost so far'), detail: `$${session.totalCostUsd.toFixed(4)}` }));
+  }
+  body.appendChild(about.section);
+
+  // --- what you can change ----------------------------------------------------
+  if (!readOnly) {
+    const controls = group(t('session.controls', 'Controls'));
+
+    const models = session.availableModels?.length ? session.availableModels : null;
+    if (models) {
+      const select = $('#opt-model');
+      select.innerHTML = '';
+      for (const entry of models) {
+        const option = document.createElement('option');
+        option.value = entry.id;
+        option.textContent = entry.name;
+        if (session.model === entry.id) option.selected = true;
+        select.appendChild(option);
+      }
+      select.hidden = false;
+      controls.card.appendChild(row({ name: 'Model', detail: model || 'default', control: select }));
+    }
+
+    const perm = $('#opt-perm');
+    perm.value = session.permissionMode || 'default';
+    perm.hidden = false;
+    controls.card.appendChild(
+      row({
+        name: t('session.permissions', 'Permissions'),
+        detail: PERMISSION_LABEL[session.permissionMode] || 'Ask me',
+        control: perm,
+      }),
+    );
+
+    if (controls.card.children.length) body.appendChild(controls.section);
+  } else {
+    // A mirror is someone else's session; the only verb is to take it over.
+    body.appendChild(
+      el(
+        'p',
+        'small muted',
+        'This is a live copy of a conversation running elsewhere on your Mac. Taking over forks it into a session you drive from here, leaving the original untouched.',
+      ),
+    );
+  }
+
   $('#opt-takeover').hidden = !readOnly;
   $('#opt-close-session').textContent = readOnly ? 'Stop mirroring' : 'End session';
-
   $('#opts-sheet').hidden = false;
 }
 
@@ -1908,6 +2122,11 @@ function wireUp() {
     } finally {
       button.disabled = false;
     }
+  });
+
+  $('#conn-banner').addEventListener('click', () => {
+    setConn('connecting');
+    connect();
   });
 
   // Voice
@@ -1996,15 +2215,19 @@ function wireUp() {
     if ((!text && !state.pending.length) || !state.currentId) return;
     const session = currentSession();
     if (session?.readOnly) {
-      toast('This is a read-only mirror. Use “Take over” to continue it.');
+      toast(t('toast.readOnly', 'This is a read-only mirror. Use “Take over” to continue it.'));
       return;
     }
 
     const images = state.pending.map(({ mediaType, data, thumbnail }) => ({ mediaType, data, thumbnail }));
     if (!send({ t: 'prompt', sessionId: state.currentId, text, images })) {
-      toast('Not connected — reconnecting…');
+      toast(t('toast.notConnected', 'Not connected — hold on, reconnecting.'));
       return;
     }
+    // Held, not discarded: the socket accepting the bytes is not the daemon
+    // accepting the message, and "this session has ended" would otherwise take
+    // the typing and the photos with it.
+    state.lastDraft = { text, pending: state.pending };
     input.value = '';
     state.pending = [];
     renderAttachments();
@@ -2037,7 +2260,11 @@ function wireUp() {
   }
   for (const sheet of document.querySelectorAll('.sheet')) {
     sheet.addEventListener('click', (event) => {
-      if (event.target === sheet && sheet.id !== 'perm-sheet') sheet.hidden = true;
+      if (event.target !== sheet || sheet.id === 'perm-sheet') return;
+      // The scanner holds a camera; hiding its sheet without stopping the
+      // tracks leaves the indicator lit and orphans the stream.
+      if (sheet.id === 'scan-sheet') closeScanner();
+      else sheet.hidden = true;
     });
   }
 
@@ -2233,7 +2460,9 @@ function wireUp() {
     if (event.key === 'Escape') {
       const open = [...document.querySelectorAll('.sheet')].filter((s) => !s.hidden && s.id !== 'perm-sheet');
       if (open.length) {
-        open.at(-1).hidden = true;
+        const top = open.at(-1);
+        if (top.id === 'scan-sheet') closeScanner();
+        else top.hidden = true;
         event.preventDefault();
         return;
       }
@@ -2318,6 +2547,7 @@ async function main() {
     node.appendChild(icon(node.dataset.icon, { size: 18 }));
   }
 
+  applyStaticText();
   wireUp();
 
   // Changing only the fragment does not reload the page, so links that arrive

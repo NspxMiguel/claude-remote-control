@@ -94,6 +94,18 @@ describe('applyTranscriptLine', () => {
     assert.equal(feed.items.length, 0);
   });
 
+  test('says which kind of title a line carried', () => {
+    // The distinction is the whole point: a transcript holds one custom-title
+    // near the top and a stream of ai-titles after it, and the app was naming
+    // conversations differently from the Claude Desktop it mirrors.
+    const feed = new Feed();
+    assert.equal(applyTranscriptLine(feed, { type: 'ai-title', aiTitle: 'Generated' }).titleKind, 'ai');
+    assert.equal(
+      applyTranscriptLine(feed, { type: 'custom-title', customTitle: 'Mine' }).titleKind,
+      'custom',
+    );
+  });
+
   test('picks up titles from either title line type', () => {
     const feed = new Feed();
     assert.equal(applyTranscriptLine(feed, { type: 'ai-title', aiTitle: 'Generated' }).title, 'Generated');

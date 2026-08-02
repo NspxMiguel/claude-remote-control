@@ -14,6 +14,14 @@ function textFromContent(content) {
     .join('\n');
 }
 
+/**
+ * Claude Code writes `<synthetic>` as the model on lines it generated itself —
+ * an error notice, a cancellation. Those are not a model anyone chose, and
+ * showing one as the session's model is worse than showing none.
+ */
+export const isRealModel = (model) =>
+  typeof model === 'string' && model.length > 0 && !model.startsWith('<');
+
 /** Apply one transcript line to a feed. Returns metadata found on the line. */
 export function applyTranscriptLine(feed, line) {
   const meta = {};
@@ -44,6 +52,11 @@ export function applyTranscriptLine(feed, line) {
 
     case 'assistant': {
       if (line.isSidechain) return meta;
+      // Every assistant line names the model that produced it. Without this the
+      // UI had nothing to show for a mirrored session and fell back to the
+      // first entry in a hardcoded list — telling you Sonnet about an Opus
+      // conversation.
+      if (isRealModel(line.message?.model)) meta.model = line.message.model;
       const content = line.message?.content;
       if (!Array.isArray(content)) return meta;
 
@@ -81,12 +94,15 @@ export function applyTranscriptLine(feed, line) {
       return meta;
     }
 
+    // Two kinds, and which one wins is not "the latest": see store.js.
     case 'ai-title':
       meta.title = line.aiTitle;
+      meta.titleKind = 'ai';
       return meta;
 
     case 'custom-title':
       meta.title = line.customTitle;
+      meta.titleKind = 'custom';
       return meta;
 
     case 'queue-operation':

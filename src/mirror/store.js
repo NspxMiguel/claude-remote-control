@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Feed } from '../protocol.js';
 import { log } from '../log.js';
-import { applyTranscriptLine, foldToolResult, parseLines } from './transcript.js';
+import { applyTranscriptLine, foldToolResult, isRealModel, parseLines } from './transcript.js';
 
 const PROJECTS_DIR =
   process.env.CRC_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects');
@@ -40,6 +40,17 @@ async function describeTranscript(file) {
     file,
     cwd: null,
     title: null,
+    /**
+     * Kept apart from `title` on purpose. A transcript carries two kinds:
+     * `custom-title`, written once near the top and the name Claude Desktop
+     * shows in its sidebar, and `ai-title`, regenerated over and over as the
+     * conversation grows. Taking whichever came last meant the app named the
+     * same conversation something else than the app it is mirroring.
+     */
+    customTitle: null,
+    aiTitle: null,
+    /** Whatever model last produced a reply here, straight from the transcript. */
+    model: null,
     preview: null,
     entrypoint: null,
     version: null,
@@ -56,8 +67,9 @@ async function describeTranscript(file) {
       if (line.entrypoint && !info.entrypoint) info.entrypoint = line.entrypoint;
       if (line.version) info.version = line.version;
       if (line.gitBranch) info.gitBranch = line.gitBranch;
-      if (line.type === 'ai-title' && line.aiTitle) info.title = line.aiTitle;
-      if (line.type === 'custom-title' && line.customTitle) info.title = line.customTitle;
+      if (line.type === 'assistant' && isRealModel(line.message?.model)) info.model = line.message.model;
+      if (line.type === 'ai-title' && line.aiTitle) info.aiTitle = line.aiTitle;
+      if (line.type === 'custom-title' && line.customTitle) info.customTitle = line.customTitle;
       if (!info.preview && line.type === 'user' && !line.isSidechain) {
         const c = line.message?.content;
         const text = typeof c === 'string' ? c : Array.isArray(c) ? (c.find((b) => b?.type === 'text')?.text ?? '') : '';
@@ -70,7 +82,9 @@ async function describeTranscript(file) {
   scan(head, false);
   if (tail) scan(tail, true);
 
-  if (!info.title) info.title = info.preview || path.basename(info.cwd || 'session');
+  // A name someone chose beats a name a model wrote, whichever came last.
+  info.title =
+    info.customTitle || info.aiTitle || info.preview || path.basename(info.cwd || 'session');
   return info;
 }
 
@@ -97,6 +111,9 @@ class MirrorSession extends EventEmitter {
       title: this.info.title,
       cwd: this.info.cwd,
       origin: this.info.entrypoint || 'unknown',
+      // The real one, or nothing. A guess here becomes a label that quietly
+      // contradicts the app being mirrored.
+      model: this.info.model,
       status: 'mirrored',
       lastActivityAt: this.info.lastActivityAt,
       claudeSessionId: this.id,
@@ -129,7 +146,12 @@ class MirrorSession extends EventEmitter {
       try {
         const meta = applyTranscriptLine(this.feed, line);
         foldToolResult(this.feed, line);
-        if (meta.title) this.info.title = meta.title;
+        if (meta.title) {
+          if (meta.titleKind === 'custom') this.info.customTitle = meta.title;
+          else this.info.aiTitle = meta.title;
+          this.info.title = this.info.customTitle || this.info.aiTitle || this.info.title;
+        }
+        if (meta.model) this.info.model = meta.model;
         if (meta.cwd) this.info.cwd = meta.cwd;
         if (meta.entrypoint) this.info.entrypoint = meta.entrypoint;
         if (meta.lastActivityAt) this.info.lastActivityAt = meta.lastActivityAt;

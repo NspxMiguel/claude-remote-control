@@ -39,6 +39,26 @@ fs.writeFileSync(
   ].join('\n'),
 );
 
+// A transcript shaped like the real ones: the name the user sees written once
+// near the top, and a stream of generated titles after it.
+const TITLED_ID = '99999999-8888-7777-6666-555555555555';
+fs.writeFileSync(
+  path.join(PROJECTS, '-tmp-demo', `${TITLED_ID}.jsonl`),
+  [
+    JSON.stringify({ type: 'custom-title', customTitle: 'What Desktop calls it', sessionId: TITLED_ID }),
+    JSON.stringify({
+      type: 'user',
+      cwd: WORK,
+      entrypoint: 'claude-desktop',
+      timestamp: '2026-08-02T04:00:00.000Z',
+      message: { role: 'user', content: 'hello' },
+    }),
+    JSON.stringify({ type: 'ai-title', aiTitle: 'A generated name', sessionId: TITLED_ID }),
+    JSON.stringify({ type: 'ai-title', aiTitle: 'Another generated name', sessionId: TITLED_ID }),
+    '',
+  ].join('\n'),
+);
+
 fs.mkdirSync(path.join(WORK, 'subdir'), { recursive: true });
 fs.mkdirSync(path.join(WORK, '.hidden'), { recursive: true });
 
@@ -328,6 +348,16 @@ describe('transcript mirroring', () => {
     assert.ok(found, 'the seeded transcript is listed');
     assert.equal(found.entrypoint, 'claude-desktop');
     assert.equal(found.title, 'Desktop conversation');
+  });
+
+
+  test('a conversation keeps the name Claude Desktop shows it under', async () => {
+    // ai-titles are rewritten as a conversation grows and always come after
+    // the custom one, so "latest wins" renamed everything.
+    const { transcripts } = await (await get('/api/transcripts')).json();
+    const found = transcripts.find((t) => t.id === TITLED_ID);
+    assert.ok(found, 'the titled transcript is listed');
+    assert.equal(found.title, 'What Desktop calls it');
   });
 
   test('opens a mirror and replays its feed', async () => {
