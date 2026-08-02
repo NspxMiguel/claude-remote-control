@@ -104,13 +104,33 @@ The daemon prints a pairing QR and every address it can be reached on:
 
 Scan it. That is the whole setup.
 
+### Pairing, three ways
+
+| | |
+|---|---|
+| **Scan** | The pairing screen has a scanner. It uses the browser's own decoder where there is one and its own where there is not — WebKit has no `BarcodeDetector`, so iPhones get [`web/qr-decode.js`](web/qr-decode.js). On plain HTTP the live camera is blocked (secure contexts only), so the button takes a photo instead and decodes that. Same result, one extra tap. |
+| **Six digits** | Click `>_` in the menu bar ▸ **Show pairing code**. It is the biggest thing in the panel, and it lasts ten minutes. No terminal, no 43-character token. |
+| **The QR** | Under the code, or from `crc pair`. Your phone's camera app opens it and pairs in one step, because the link carries the token. |
+
 ### Install it on your phone
 
-**iOS** — open the address in Safari, then Share ▸ Add to Home Screen.
-**Android** — Chrome ▸ ⋮ ▸ Install app.
+Pair, and the app offers to install itself with the steps for the browser you
+are actually holding. Or do it yourself: **iOS** Share ▸ Add to Home Screen,
+**Android** ⋮ ▸ Install app.
 
 It installs on a desktop too, from the address bar. The same page becomes a
 proper desktop panel with a session sidebar above 900px.
+
+### When the address stops working
+
+Addresses go stale: Tailscale is off on the phone, or you walked out of the
+house, or the Mac is asleep. The shell still opens from the service worker's
+cache, so instead of a page that never loads you get a screen naming every
+other address this Mac answered on, with the token carried across so the new
+one is paired on arrival.
+
+The tailnet addresses say so, because "not connected to Tailscale" and "Mac is
+off" look identical from a phone otherwise.
 
 ### Everyday commands
 
@@ -328,6 +348,8 @@ web/                          # the PWA: no framework, no build step
 ├── app.js                    # state, transport, wiring
 ├── feed-view.js              # feed items and grouped tool runs → DOM
 ├── markdown.js               # escaped-first renderer (a security boundary)
+├── scanner.js                # camera or photo → a pairing code
+├── qr-decode.js              # a QR decoder, because WebKit has none
 └── sw.js                     # offline shell, network-first
 ```
 

@@ -13,6 +13,9 @@ import {
 
 const TOKEN_KEY = 'crc.token';
 const LAST_SESSION_KEY = 'crc.lastSession';
+/** Every address this Mac answered on, learned while connected. */
+const ADDRESSES_KEY = 'crc.addresses';
+const INSTALL_PROMPTED_KEY = 'crc.installPrompted';
 
 const state = {
   token: localStorage.getItem(TOKEN_KEY),
@@ -97,13 +100,288 @@ function defaultDeviceName() {
   return 'Browser';
 }
 
+/**
+ * Every way back to the pairing screen goes through here — being unpaired,
+ * revoked from another device, or simply arriving without a token. The scanner
+ * has to be told which of its two routes this browser allows, and forgetting
+ * that on one of the paths leaves a button with no explanation under it.
+ */
+function showGate() {
+  $('#app').hidden = true;
+  $('#gate').hidden = false;
+  prepareScanner();
+}
+
 function unpair(silent) {
   localStorage.removeItem(TOKEN_KEY);
   state.token = null;
   state.ws?.close();
-  $('#app').hidden = true;
-  $('#gate').hidden = false;
+  showGate();
   if (!silent) toast('Device unpaired');
+}
+
+// ---------------------------------------------------------------------------
+// Knowing where else this Mac lives
+// ---------------------------------------------------------------------------
+
+/**
+ * The addresses the daemon last reported, kept on the device.
+ *
+ * A phone that walks out of Wi-Fi range, or that has Tailscale switched off,
+ * asks for an address that no longer resolves — and a page that never loads
+ * cannot tell you why. The service worker still serves the shell from cache,
+ * so the app opens; these are what it can offer instead of a spinner.
+ */
+function rememberAddresses(urls) {
+  if (!Array.isArray(urls) || !urls.length) return;
+  try {
+    const worth = urls
+      .filter((u) => u.kind !== 'local')
+      .map((u) => ({ url: u.url, label: u.label, kind: u.kind }));
+    if (worth.length) localStorage.setItem(ADDRESSES_KEY, JSON.stringify(worth));
+  } catch {
+    /* private mode, or a full quota — the app works, it just cannot suggest */
+  }
+}
+
+function knownAddresses() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ADDRESSES_KEY) || '[]');
+    return Array.isArray(stored) ? stored : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Is the daemon answering here, right now? */
+async function daemonReachable(timeoutMs = 4000) {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), timeoutMs);
+  try {
+    const res = await fetch('/api/health', { signal: abort.signal, cache: 'no-store' });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Offer the other addresses, carrying the token so the new origin is paired on
+ * arrival — a device token belongs to the origin that stored it, and without
+ * this you would land on the pairing screen with nothing to type.
+ */
+function showUnreachable(detail) {
+  const sheet = $('#offline-sheet');
+  $('#offline-detail').textContent =
+    detail || 'This address is not answering. That usually means the Mac is asleep, or this phone is on a different network than it was.';
+
+  const list = $('#offline-addresses');
+  list.innerHTML = '';
+  const here = `${location.protocol}//${location.host}`;
+  const others = knownAddresses().filter((a) => !a.url.startsWith(here));
+
+  if (others.length) {
+    list.appendChild(el('label', null, 'Try another address'));
+    for (const address of others) {
+      const row = el('button', 'address-choice');
+      row.type = 'button';
+      row.appendChild(el('span', 'address-url', address.url));
+      row.appendChild(el('span', 'address-label', address.label || address.kind));
+      row.addEventListener('click', () => {
+        // The fragment is consumed and wiped by the pairing flow on arrival.
+        location.href = state.token ? `${address.url}/#token=${encodeURIComponent(state.token)}` : address.url;
+      });
+      list.appendChild(row);
+    }
+    if (others.some((a) => a.kind === 'tailscale')) {
+      list.appendChild(
+        el('p', 'small muted', 'The 100.x address and the machine name both need Tailscale switched on here.'),
+      );
+    }
+  } else {
+    list.appendChild(
+      el('p', 'small muted', 'No other address is known yet — connect once on your home network and this list fills itself in.'),
+    );
+  }
+
+  sheet.hidden = false;
+}
+
+// ---------------------------------------------------------------------------
+// Add to home screen
+// ---------------------------------------------------------------------------
+
+const isStandalone = () =>
+  window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+/** Chromium fires this ahead of time; WebKit never does. */
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  deferredInstall = event;
+});
+
+function installSteps() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)) {
+    return [
+      'Tap the Share button at the bottom of the screen.',
+      'Scroll down and choose "Add to Home Screen".',
+      'Tap Add. It appears with the other apps.',
+    ];
+  }
+  if (/Android/.test(ua)) {
+    return ['Open the browser menu (⋮).', 'Choose "Install app" or "Add to Home screen".', 'Confirm.'];
+  }
+  return ['Open the browser menu.', 'Choose "Install" or "Add to Home screen".'];
+}
+
+// ---------------------------------------------------------------------------
+// Scanning the pairing code
+// ---------------------------------------------------------------------------
+
+/** Loaded on demand: a decoder nobody needs until they press Scan. */
+let scannerModule = null;
+const loadScanner = async () => (scannerModule ||= await import('./scanner.js'));
+
+let stopCamera = null;
+
+/** Say up front which of the two ways in this browser is going to give us. */
+async function prepareScanner() {
+  const scanner = await loadScanner();
+  const obstacle = scanner.liveCameraObstacle();
+  $('#scan-note').textContent = obstacle || 'Opens the camera. Hold it over the code on your Mac.';
+  $('#scan-open').textContent = obstacle ? 'Take a photo of the code' : 'Scan the QR code';
+}
+
+async function handleScan(text) {
+  const scanner = await loadScanner();
+  const result = scanner.interpretScan(text);
+
+  if (result.kind === 'unknown') {
+    toast('That is not a pairing code from this app.');
+    return false;
+  }
+
+  // A link scanned from another machine's screen points at that machine. Going
+  // there is the whole point of scanning it.
+  if (result.kind === 'token' && result.origin && result.origin !== location.origin) {
+    location.href = `${result.origin}/#token=${encodeURIComponent(result.token)}`;
+    return true;
+  }
+
+  try {
+    await pair(result.kind === 'code' ? result.code : result.token, $('#pair-name').value);
+    await enterApp({ paired: true });
+    return true;
+  } catch (err) {
+    const errorNode = $('#pair-error');
+    errorNode.textContent = err.message;
+    errorNode.hidden = false;
+    return false;
+  }
+}
+
+/** Gate → app, with the one-time install nudge. */
+async function enterApp({ paired = true } = {}) {
+  $('#gate').hidden = true;
+  $('#scan-sheet').hidden = true;
+  $('#app').hidden = false;
+  await boot();
+  if (paired) offerInstall();
+}
+
+function wireScanner() {
+  const closeScanner = () => {
+    stopCamera?.();
+    stopCamera = null;
+    $('#scan-sheet').hidden = true;
+  };
+
+  $('#scan-close').addEventListener('click', closeScanner);
+
+  $('#scan-open').addEventListener('click', async () => {
+    const scanner = await loadScanner();
+
+    // No live camera on this origin: a photo goes through the same decoder,
+    // and on a phone the file picker opens the camera anyway.
+    if (!scanner.liveCameraAvailable()) {
+      $('#scan-file').click();
+      return;
+    }
+
+    $('#scan-sheet').hidden = false;
+    $('#scan-status').textContent = 'Hold the code square on, filling the frame.';
+    try {
+      stopCamera = await scanner.startCamera(
+        $('#scan-video'),
+        async (text) => {
+          $('#scan-status').textContent = 'Got it.';
+          if (!(await handleScan(text))) {
+            closeScanner();
+          }
+        },
+        (err) => {
+          $('#scan-status').textContent = err?.message || 'The camera stopped.';
+        },
+      );
+    } catch (err) {
+      closeScanner();
+      // Permission refused, or no camera at all — the photo route still works.
+      $('#scan-note').textContent =
+        err?.name === 'NotAllowedError'
+          ? 'Camera access was refused. Take a photo of the code instead.'
+          : 'No camera here. Take a photo of the code instead.';
+      $('#scan-open').textContent = 'Take a photo of the code';
+      $('#scan-file').click();
+    }
+  });
+
+  $('#scan-file').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = ''; // so picking the same photo twice still fires
+    if (!file) return;
+
+    $('#scan-note').textContent = 'Reading the code…';
+    try {
+      const scanner = await loadScanner();
+      const text = await scanner.scanFromFile(file);
+      if (!text) {
+        $('#scan-note').textContent =
+          'No code found in that photo. Get closer, fill the frame, and keep the phone square on.';
+        return;
+      }
+      if (!(await handleScan(text))) $('#scan-note').textContent = 'Try again, or type the code below.';
+    } catch (err) {
+      $('#scan-note').textContent = err.message;
+    }
+  });
+}
+
+/**
+ * Offered once, right after pairing — the moment someone has just proved they
+ * want this on their phone. Never again after that, and never when it is
+ * already installed.
+ */
+function offerInstall() {
+  if (isStandalone() || localStorage.getItem(INSTALL_PROMPTED_KEY)) return;
+  localStorage.setItem(INSTALL_PROMPTED_KEY, '1');
+
+  const steps = $('#install-steps');
+  steps.innerHTML = '';
+
+  if (deferredInstall) {
+    // A browser that can do it for us needs no instructions.
+    steps.appendChild(el('li', null, 'One tap and it is on your home screen.'));
+    $('#install-now').hidden = false;
+  } else {
+    for (const step of installSteps()) steps.appendChild(el('li', null, step));
+    $('#install-now').hidden = true;
+  }
+
+  $('#install-sheet').hidden = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -543,7 +821,9 @@ function renderHeader() {
   $('#app').dataset.agent = session.agent || (session.kind === 'mirror' ? 'claude-code' : '');
   $('#session-title').textContent = session.title || 'Session';
   const bits = [];
-  if (session.cwd) bits.push(session.cwd.replace(/^\/Users\/[^/]+/, '~'));
+  // The folder name, not the path to it: this is a pill under the title on a
+  // phone, and the full path is one tap away in the session sheet.
+  if (session.cwd) bits.push(session.cwd.replace(/\/+$/, '').split('/').pop() || session.cwd);
   // Only name the agent when it is not the default, to keep the line short.
   if (session.agent && session.agent !== 'claude-code') bits.push(session.agentLabel || session.agent);
   if (session.model) bits.push(session.model.replace(/^claude-/, ''));
@@ -1333,13 +1613,47 @@ function wireUp() {
     errorNode.hidden = true;
     try {
       await pair($('#pair-input').value, $('#pair-name').value);
-      $('#gate').hidden = true;
-      $('#app').hidden = false;
-      await boot();
+      await enterApp();
     } catch (err) {
       errorNode.textContent = err.message;
       errorNode.hidden = false;
     }
+  });
+
+  wireScanner();
+
+  // Address switching, when this one stopped answering
+  $('#offline-close').addEventListener('click', () => {
+    $('#offline-sheet').hidden = true;
+  });
+  $('#offline-retry').addEventListener('click', async () => {
+    const button = $('#offline-retry');
+    button.disabled = true;
+    button.textContent = 'Checking…';
+    if (await daemonReachable()) {
+      location.reload();
+      return;
+    }
+    button.disabled = false;
+    button.textContent = 'Try this address again';
+    toast('Still nothing at this address');
+  });
+
+  // Add to home screen
+  $('#install-close').addEventListener('click', () => {
+    $('#install-sheet').hidden = true;
+  });
+  $('#install-later').addEventListener('click', () => {
+    $('#install-sheet').hidden = true;
+  });
+  $('#install-now').addEventListener('click', async () => {
+    $('#install-sheet').hidden = true;
+    try {
+      await deferredInstall?.prompt();
+    } catch {
+      /* the user dismissed it, which is an answer */
+    }
+    deferredInstall = null;
   });
 
   // Drawer
@@ -1655,6 +1969,8 @@ async function boot() {
 
   try {
     state.serverState = await api('/api/state');
+    // Learn the way back in before the way in stops working.
+    rememberAddresses(state.serverState.urls);
   } catch {
     /* the socket will retry */
   }
@@ -1704,22 +2020,34 @@ async function main() {
   // A pairing link drops the token in the fragment; consume it and clean the URL.
   const hash = new URLSearchParams(location.hash.slice(1));
   const hashToken = hash.get('token');
+  let justPaired = false;
   if (hashToken) {
     history.replaceState(null, '', location.pathname);
     try {
       await pair(hashToken, defaultDeviceName());
+      justPaired = true;
     } catch (err) {
       console.warn(err);
     }
   }
 
   if (!state.token) {
-    $('#gate').hidden = false;
+    showGate();
+    return;
+  }
+
+  // Before the app tries to draw itself out of an API that will not answer:
+  // the shell comes from the service worker's cache, so this screen opens
+  // even when the address it was installed from resolves to nothing.
+  if (!(await daemonReachable())) {
+    $('#app').hidden = false;
+    showUnreachable();
     return;
   }
 
   $('#app').hidden = false;
   await boot();
+  if (justPaired) offerInstall();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
