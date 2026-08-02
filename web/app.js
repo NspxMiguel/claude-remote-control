@@ -825,11 +825,25 @@ function showNextPermission() {
   $('#perm-desc').textContent = next.description || '';
 
   const detail = $('#perm-detail');
+  const rich = $('#perm-rich');
   const input = next.input || {};
-  if (next.toolName === 'Bash' && input.command) detail.textContent = input.command;
-  else if (input.file_path && input.new_string !== undefined) {
+  detail.hidden = false;
+  rich.hidden = true;
+
+  if (next.toolName === 'ExitPlanMode' && input.plan) {
+    // A plan is prose meant to be read and judged, not a payload to inspect.
+    rich.innerHTML = renderMarkdown(String(input.plan));
+    rich.hidden = false;
+    detail.hidden = true;
+    $('#perm-title').textContent = 'Review this plan';
+    $('#perm-sub').textContent = 'Approving lets Claude start carrying it out.';
+  } else if (next.toolName === 'Bash' && input.command) {
+    detail.textContent = input.command;
+  } else if (input.file_path && input.new_string !== undefined) {
     detail.textContent = `${input.file_path}\n\n- ${String(input.old_string || '').slice(0, 600)}\n+ ${String(input.new_string || '').slice(0, 600)}`;
-  } else detail.textContent = JSON.stringify(input, null, 2).slice(0, 2000);
+  } else {
+    detail.textContent = JSON.stringify(input, null, 2).slice(0, 2000);
+  }
 
   $('#perm-queue').textContent =
     state.permQueue.length > 1 ? `${state.permQueue.length - 1} more waiting` : '';

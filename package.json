@@ -23,7 +23,7 @@
     "start": "node bin/crc.js start",
     "status": "node bin/crc.js status",
     "pair": "node bin/crc.js pair",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test test/*.test.js",
     "icons": "node scripts/generate-icons.mjs"
   },
   "keywords": [
