@@ -32,8 +32,8 @@ commands, and ask your permission before it does.
 | **Your desktop sessions, mirrored** | Conversations you started in Claude Desktop or the `claude` CLI show up read-only and update live, because both write the same JSONL transcripts. **Take over** forks one into a session you drive from the phone, leaving the original intact. |
 | **Photos and screenshots** | Attach from the camera or gallery, or paste one on desktop. Images are downscaled in the browser before upload, so a 12 MB photo crosses the network as a couple hundred KB. An agent with no native image support gets the file written beside the project and named in the prompt, so attaching works everywhere. |
 | **Sign an agent in from the phone** | Settings lists every agent, whether it is ready, and the exact command that signs it in. If you cannot reach a terminal, paste an API key instead — it is stored mode-600 next to the master token and exported to that agent only. It never comes back out over the API. |
-| **More than one agent** | Claude Code is the one this is built around. Cursor works through ACP, including remote approval. Antigravity works through its headless stream. The UI adapts to what each one can actually do. |
-| **Keeps the Mac up while you are out** | Two switches in Settings. *Keep this Mac awake* holds a `caffeinate -s`, which prevents idle sleep on mains power. *Run with the lid closed* flips `pmset -c disablesleep`, the only thing that survives shutting the lid — this is what Amphetamine's Power Protect installs a privileged helper for. |
+| **More than one agent** | Claude Code is the one this is built around. Antigravity works through its headless stream. The UI adapts to what each one can actually do. |
+| **Keeps the Mac up while you are out** | Two switches in Settings. *Keep this Mac awake* holds a `caffeinate -s`, which prevents idle sleep on mains power. *Run with the lid closed* flips `pmset -a disablesleep`, the only thing that survives shutting the lid, and the daemon clears it the moment you unplug — this is what Amphetamine's Power Protect installs a privileged helper for. |
 | **Nothing in the middle** | No cloud, no relay, no account. The daemon talks to your phone over your LAN or your tailnet, and the code that runs is the code in this repo. |
 
 ## Why
@@ -176,15 +176,13 @@ through whatever interface they actually expose, which is not the same for each.
 | Agent | How it connects | Streaming | Remote approval | Notes |
 | --- | --- | --- | --- | --- |
 | **Claude Code** | Agent SDK | token-level | yes | Full support. Models, interrupt, images, resume. |
-| **Cursor** | `agent acp` (Agent Client Protocol) | chunked | yes | ACP is the only Cursor interface that can ask a human; its print mode streams one-way with no channel to answer on. |
 | **Antigravity** | `agy -p --output-format stream-json` | chunked | **no** | Its headless stream is one-way, and it asks for approval *on the host* — with nobody at that terminal every tool is denied. Verified against agy 1.1.9: pick **Bypass all** for a remote Antigravity session, or it will read nothing and write nothing. |
 
 The UI only offers agents that are installed, and says up front what a given one
 cannot do rather than showing buttons that quietly fail.
 
 > Antigravity has been run end to end against the real binary (agy 1.1.9),
-> including tool calls and an image sent from a phone. Cursor is written against
-> the published ACP schema and covered by a fixture that speaks that protocol,
+> including tool calls and an image sent from a phone.
 > but has not been run against the real `agent` binary — if you hit a mismatch,
 > that is where to look first.
 
@@ -309,7 +307,6 @@ network resumes with `?since=<seq>` instead of refetching the conversation.
   "disallowedTools": ["AskUserQuestion"],
   "credentials": {},              // set from Settings ▸ Agents, never by hand
   "claudeExecutable": null,       // set if the binary lives somewhere unusual
-  "acpExecutable": null,
   "antigravityExecutable": null
 }
 ```
@@ -361,7 +358,7 @@ web/                          # the PWA: no framework, no build step
 | **Interactive prompts inside a tool** | A shell command that stops to ask a question is not forwarded; it will hang until it times out. |
 | **Mirrored sessions are read-only** | Writing into a transcript another process owns would corrupt it, so taking over forks instead. |
 | **Restarting the daemon ends live sessions** | They live in memory. The conversation is safe — it reappears under *On this machine*, and **Take over** picks it back up. |
-| **Cursor and Antigravity are untested against the real binaries** | Written against their published protocols, covered by protocol-level fixtures. Claude Code is the path that has actually been exercised end to end. |
+| **Antigravity is the one exercised end to end** | Driven against the real `agy` binary — a session, a file written into the folder you picked, a photo read back. Claude Code is covered by a fixture that speaks the SDK's control protocol. |
 
 ## Development
 

@@ -86,7 +86,7 @@ describe('using a key', () => {
 
   test('each agent has its own variable', () => {
     assert.equal(CREDENTIAL_SPECS['claude-code'].envVar, 'ANTHROPIC_API_KEY');
-    assert.equal(CREDENTIAL_SPECS.acp.envVar, 'CURSOR_API_KEY');
+
     assert.equal(CREDENTIAL_SPECS.antigravity.envVar, 'GEMINI_API_KEY');
   });
 

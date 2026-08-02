@@ -232,7 +232,6 @@ export class Session extends EventEmitter {
   agentContext() {
     const configKey = {
       'claude-code': 'claudeExecutable',
-      acp: 'acpExecutable',
       antigravity: 'antigravityExecutable',
     }[this.driverId];
     return { label: this.driverLabel, configKey };

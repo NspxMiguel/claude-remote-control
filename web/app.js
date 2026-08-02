@@ -1034,6 +1034,72 @@ async function beginSignIn(agent, button) {
   button.textContent = `Sign in to ${agent.label}`;
 }
 
+// ---------------------------------------------------------------------------
+// Settings, as groups of rows
+// ---------------------------------------------------------------------------
+
+/**
+ * A titled group holding one card of rows.
+ *
+ * Settings used to be a stack of separate islands with a gap between every
+ * line, which reads as a pile of unrelated things. Related rows belong in one
+ * card, divided by hairlines, under one small heading — the divider carries the
+ * structure so nothing else has to.
+ */
+function group(title, note) {
+  const section = el('section', 's-group');
+  if (title) section.appendChild(el('h4', null, title));
+  if (note) section.appendChild(el('p', 'muted', note));
+  const card = el('div', 's-card');
+  section.appendChild(card);
+  return { section, card };
+}
+
+/**
+ * One row: a status dot, a name with a line of detail under it, and at most one
+ * control on the right.
+ */
+function row({ dot, name, detail, control, note }) {
+  const node = el('div', 's-row');
+  if (dot) node.appendChild(el('i', `dot ${dot}`));
+
+  const text = el('div', 's-row-text');
+  text.appendChild(el('strong', null, name));
+  if (detail) text.appendChild(el('span', null, detail));
+  node.appendChild(text);
+
+  if (control) node.appendChild(control);
+  // Anything that needs more than a line of detail — a hint, a command, a form —
+  // goes below the row rather than squeezing into it.
+  if (note) {
+    const wrap = el('div', 's-row-extra');
+    wrap.appendChild(node);
+    for (const child of [].concat(note)) wrap.appendChild(child);
+    return wrap;
+  }
+  return node;
+}
+
+/** A checkbox that looks like a switch. The input keeps its id and listeners. */
+function toggle(on, onChange) {
+  const label = el('label', 'switch');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = Boolean(on);
+  input.addEventListener('change', () => onChange(input.checked, input));
+  label.appendChild(input);
+  label.appendChild(document.createElement('i'));
+  return label;
+}
+
+/** A small pill button on the right of a row. */
+function action(text, handler, { neutral = false } = {}) {
+  const button = el('button', `s-action${neutral ? ' neutral' : ''}`, text);
+  button.type = 'button';
+  button.addEventListener('click', () => handler(button));
+  return button;
+}
+
 /**
  * Sign an agent in from the phone. Every agent here normally authenticates in a
  * terminal on the host, which is exactly what you do not have when you are away
@@ -1045,18 +1111,13 @@ function renderAgentSettings(agents) {
   container.innerHTML = '';
   if (!agents.length) return;
 
-  container.appendChild(el('label', null, 'Agents'));
+  const { section, card } = group('Agent accounts');
+  card.classList.add('boxed');
 
   for (const agent of agents) {
-    const row = el('div', 'agent-row');
-
-    const head = el('div', 'agent-head');
-    head.appendChild(el('i', `dot ${agent.available ? 'idle' : 'error'}`));
-    head.appendChild(el('span', 'agent-name', agent.label));
-    head.appendChild(el('span', 'agent-state', agent.available ? 'ready' : agent.detail || 'unavailable'));
-    row.appendChild(head);
-
+    const extras = [];
     const credential = agent.credential;
+
     if (credential) {
       if (credential.set) {
         const stored = el('div', 'agent-key');
@@ -1075,20 +1136,20 @@ function renderAgentSettings(agents) {
           }
         });
         stored.appendChild(remove);
-        row.appendChild(stored);
+        extras.push(stored);
       } else {
         // The good path: sign in with the account, no token handling at all.
         if (agent.canSignIn) {
           const signIn = el('button', 'primary wide', `Sign in to ${agent.label}`);
           signIn.type = 'button';
           signIn.addEventListener('click', () => beginSignIn(agent, signIn));
-          row.appendChild(signIn);
-          row.appendChild(
-            el('p', 'small muted', 'Opens the sign-in page. Approve it, paste the code back, done.'),
+          extras.push(signIn);
+          extras.push(
+            el('p', null, 'Opens the sign-in page. Approve it, paste the code back, done.'),
           );
-          row.appendChild(el('p', 'small muted', 'Or paste a token or API key instead:'));
+          extras.push(el('p', null, 'Or paste a token or API key instead:'));
         } else {
-          row.appendChild(el('p', 'small muted', credential.loginHint));
+          extras.push(el('p', null, credential.loginHint));
         }
 
         const form = el('div', 'agent-key');
@@ -1117,41 +1178,23 @@ function renderAgentSettings(agents) {
           }
         });
         form.appendChild(save);
-        row.appendChild(form);
+        extras.push(form);
       }
     } else if (!agent.available && agent.fix) {
-      row.appendChild(el('p', 'small muted', agent.fix));
+      extras.push(el('p', null, agent.fix));
     }
 
-    container.appendChild(row);
-  }
-}
-
-/**
- * Offer the agents that are actually installed. One that is missing still
- * appears, disabled, with the command that installs it — more useful than
- * pretending the app only ever supported one.
- */
-function renderAgentPicker() {
-  const select = $('#new-agent');
-  const agents = state.serverState?.agents || [];
-  select.innerHTML = '';
-
-  for (const agent of agents) {
-    const option = document.createElement('option');
-    option.value = agent.id;
-    // Say why it is unusable — "not signed in" and "not installed" have very
-    // different fixes, and the option label is where you notice the difference.
-    option.textContent = agent.available ? agent.label : `${agent.label} — ${agent.detail || 'unavailable'}`;
-    option.disabled = !agent.available;
-    select.appendChild(option);
+    card.appendChild(
+      row({
+        dot: agent.available ? 'idle' : 'error',
+        name: agent.label,
+        detail: agent.available ? 'ready' : agent.detail || 'unavailable',
+        note: extras.length ? extras : null,
+      }),
+    );
   }
 
-  const firstAvailable = agents.find((a) => a.available);
-  if (firstAvailable) select.value = firstAvailable.id;
-  select.parentElement.querySelector('label[for=new-agent]').hidden = agents.length < 2;
-  select.hidden = agents.length < 2;
-  renderAgentNote();
+  container.appendChild(section);
 }
 
 /** Say plainly what the chosen agent cannot do, instead of silent surprises. */
@@ -1231,54 +1274,17 @@ async function renderSetup() {
     return;
   }
 
-  container.appendChild(el('label', null, 'This Mac'));
+  // --- what this Mac has installed -------------------------------------------
+  const machine = group('This Mac');
 
   for (const task of data.tasks) {
-    const row = el('div', 'agent-row');
-    const head = el('div', 'agent-head');
-    head.appendChild(el('i', `dot ${task.done ? 'idle' : 'error'}`));
-    head.appendChild(el('span', 'agent-name', task.label));
-    head.appendChild(el('span', 'agent-state', task.detail || (task.done ? 'ready' : 'missing')));
-    row.appendChild(head);
-
+    const extras = [];
     if (!task.done) {
-      row.appendChild(el('p', 'small muted', task.manualHint || task.detail));
+      extras.push(el('p', null, task.manualHint || task.detail));
 
-      if (task.runnable) {
-        const run = el('button', 'ghost-btn wide', `Install ${task.label}`);
-        run.type = 'button';
-        run.addEventListener('click', async () => {
-          run.disabled = true;
-          run.textContent = 'Working…';
-          try {
-            await api(`/api/setup/${task.id}`, { method: 'POST' });
-            toast(`${task.label} ready`);
-            openSettings();
-          } catch (err) {
-            toast(err.message);
-            run.disabled = false;
-            run.textContent = `Install ${task.label}`;
-          }
-        });
-        row.appendChild(run);
-      } else if (task.manual) {
+      if (task.manual) {
         // It needs a password, so the closest thing to a button is putting the
         // command in a Terminal window on the host, ready to run.
-        const open = el('button', 'ghost-btn wide', 'Open in Terminal on the Mac');
-        open.type = 'button';
-        open.addEventListener('click', async () => {
-          try {
-            await api('/api/setup/terminal', {
-              method: 'POST',
-              body: JSON.stringify({ command: task.manual }),
-            });
-            toast('Opened on the Mac — press return there');
-          } catch (err) {
-            toast(err.message);
-          }
-        });
-        row.appendChild(open);
-
         const command = el('div', 'setup-command');
         command.appendChild(el('code', null, task.manual));
         const copy = el('button', 'link-btn', 'Copy');
@@ -1290,106 +1296,133 @@ async function renderSetup() {
           }, 1600);
         });
         command.appendChild(copy);
-        row.appendChild(command);
+        extras.push(command);
       }
     }
-    container.appendChild(row);
+
+    let control = null;
+    if (!task.done && task.runnable) {
+      control = action(`Install`, async (button) => {
+        button.disabled = true;
+        button.textContent = 'Working…';
+        try {
+          await api(`/api/setup/${task.id}`, { method: 'POST' });
+          toast(`${task.label} ready`);
+          openSettings();
+        } catch (err) {
+          toast(err.message);
+          button.disabled = false;
+          button.textContent = 'Install';
+        }
+      });
+    } else if (!task.done && task.manual) {
+      control = action('Open Terminal', async () => {
+        try {
+          await api('/api/setup/terminal', {
+            method: 'POST',
+            body: JSON.stringify({ command: task.manual }),
+          });
+          toast('Opened on the Mac — press return there');
+        } catch (err) {
+          toast(err.message);
+        }
+      });
+    }
+
+    machine.card.appendChild(
+      row({
+        dot: task.done ? 'idle' : 'error',
+        name: task.label,
+        detail: task.detail || (task.done ? 'ready' : 'missing'),
+        control,
+        note: extras.length ? extras : null,
+      }),
+    );
   }
+  container.appendChild(machine.section);
+
+  // --- sleep ------------------------------------------------------------------
+  const sleep = group('Sleep');
 
   // Keep awake — what people install Amphetamine for.
   if (data.keepAwake?.supported) {
-    const row = el('div', 'agent-row');
-    const head = el('div', 'agent-head');
-    head.appendChild(el('i', `dot ${data.keepAwake.active ? 'idle' : ''}`));
-    head.appendChild(el('span', 'agent-name', 'Keep this Mac awake'));
-
-    const toggle = el('button', 'link-btn', data.keepAwake.active ? 'Turn off' : 'Turn on');
-    toggle.type = 'button';
-    toggle.addEventListener('click', async () => {
-      try {
-        await api('/api/setup/keep-awake', {
-          method: 'PUT',
-          body: JSON.stringify({ enabled: !data.keepAwake.active }),
-        });
-        renderSetup();
-      } catch (err) {
-        toast(err.message);
-      }
-    });
-    head.appendChild(toggle);
-    row.appendChild(head);
-    row.appendChild(el('p', 'small muted', data.keepAwake.description));
-    container.appendChild(row);
+    sleep.card.appendChild(
+      row({
+        dot: data.keepAwake.active ? 'idle' : '',
+        name: 'Keep this Mac awake',
+        detail: data.keepAwake.description,
+        control: toggle(data.keepAwake.active, async (wanted, input) => {
+          try {
+            await api('/api/setup/keep-awake', {
+              method: 'PUT',
+              body: JSON.stringify({ enabled: wanted }),
+            });
+            renderSetup();
+          } catch (err) {
+            toast(err.message);
+            input.checked = !wanted;
+          }
+        }),
+      }),
+    );
   }
 
   // Closed-lid mode. Separate from keep-awake because it needs root once:
   // closing the lid is its own sleep event, and only pmset suppresses it.
   if (data.closedLid?.supported) {
-    const row = el('div', 'agent-row');
-    const head = el('div', 'agent-head');
-    head.appendChild(el('i', `dot ${data.closedLid.active ? 'idle' : ''}`));
-    head.appendChild(el('span', 'agent-name', 'Run with the lid closed'));
-
     if (data.closedLid.permitted) {
-      // `wanted` is the switch; `active` is whether it is in force right now,
-      // which on battery it deliberately is not.
-      const toggle = el('button', 'link-btn', data.closedLid.wanted ? 'Turn off' : 'Turn on');
-      toggle.type = 'button';
-      toggle.addEventListener('click', async () => {
-        try {
-          await api('/api/setup/closed-lid', {
-            method: 'PUT',
-            body: JSON.stringify({ enabled: !data.closedLid.wanted }),
-          });
-          renderSetup();
-        } catch (err) {
-          toast(err.message);
-        }
-      });
-      head.appendChild(toggle);
-    } else {
-      head.appendChild(el('span', 'agent-state', 'needs permission once'));
-    }
-    row.appendChild(head);
-    if (data.closedLid.permitted && data.closedLid.status) {
-      row.appendChild(el('p', 'small muted', data.closedLid.status));
-    }
-    row.appendChild(el('p', 'small muted', data.closedLid.description));
-
-    if (!data.closedLid.permitted) {
-      row.appendChild(
-        el(
-          'p',
-          'small muted',
-          'Changing this needs root, so it has to be granted once on the Mac. The script below ' +
-            'allows exactly two commands — turning this setting on and off — and nothing else.',
-        ),
+      sleep.card.appendChild(
+        row({
+          // `wanted` is the switch; `active` is whether it is in force right
+          // now, which on battery it deliberately is not.
+          dot: data.closedLid.active ? 'idle' : '',
+          name: 'Run with the lid closed',
+          detail: data.closedLid.status || data.closedLid.description,
+          control: toggle(data.closedLid.wanted, async (wanted, input) => {
+            try {
+              await api('/api/setup/closed-lid', {
+                method: 'PUT',
+                body: JSON.stringify({ enabled: wanted }),
+              });
+              renderSetup();
+            } catch (err) {
+              toast(err.message);
+              input.checked = !wanted;
+            }
+          }),
+        }),
       );
-      const open = el('button', 'ghost-btn wide', 'Open in Terminal on the Mac');
-      open.type = 'button';
-      open.addEventListener('click', async () => {
-        try {
-          await api('/api/setup/terminal', {
-            method: 'POST',
-            body: JSON.stringify({ command: data.closedLid.setupCommand }),
-          });
-          toast('Opened on the Mac — press return and enter your password');
-        } catch (err) {
-          toast(err.message);
-        }
-      });
-      row.appendChild(open);
+    } else {
+      sleep.card.appendChild(
+        row({
+          dot: '',
+          name: 'Run with the lid closed',
+          detail: 'needs permission once',
+          control: action('Grant', async () => {
+            try {
+              await api('/api/setup/terminal', {
+                method: 'POST',
+                body: JSON.stringify({ command: data.closedLid.setupCommand }),
+              });
+              toast('Opened on the Mac — press return and enter your password');
+            } catch (err) {
+              toast(err.message);
+            }
+          }),
+          note: el(
+            'p',
+            null,
+            'Changing this needs root, so it has to be granted once on the Mac. The script ' +
+              'allows exactly two commands — turning this setting on and off — and nothing else.',
+          ),
+        }),
+      );
     }
-    container.appendChild(row);
   }
+  if (sleep.card.children.length) container.appendChild(sleep.section);
 
-  // Project folder — where new sessions start.
-  const folder = el('div', 'agent-row');
-  const folderHead = el('div', 'agent-head');
-  folderHead.appendChild(el('span', 'agent-name', 'Project folder'));
-  folder.appendChild(folderHead);
-  folder.appendChild(el('p', 'small muted', prettyPath(data.defaultCwd)));
-
+  // --- where new sessions start -----------------------------------------------
+  const folder = group('Project folder', prettyPath(data.defaultCwd));
   const options = el('div', 'root-options');
   for (const root of data.suggestedRoots) {
     const choice = el('button', `root-choice${root === data.defaultCwd ? ' active' : ''}`, prettyPath(root));
@@ -1406,8 +1439,8 @@ async function renderSetup() {
     });
     options.appendChild(choice);
   }
-  folder.appendChild(options);
-  container.appendChild(folder);
+  folder.card.appendChild(options);
+  container.appendChild(folder.section);
 }
 
 const prettyPath = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~');
@@ -1425,49 +1458,44 @@ function renderPermissions(defaults = {}) {
   container.innerHTML = '';
   const on = defaults.permissionMode === BYPASS_MODE;
 
-  container.appendChild(el('label', null, 'Permissions'));
-
-  const row = el('div', 'agent-row');
-  const head = el('div', 'agent-head');
-  head.appendChild(el('i', `dot ${on ? 'error' : 'idle'}`));
-  head.appendChild(el('span', 'agent-name', 'Never ask for permission'));
-
-  const toggle = el('button', 'link-btn', on ? 'Turn off' : 'Turn on');
-  toggle.type = 'button';
-  toggle.addEventListener('click', async () => {
-    toggle.disabled = true;
-    try {
-      const { applied } = await api('/api/settings', {
-        method: 'POST',
-        body: JSON.stringify({
-          defaultPermissionMode: on ? 'default' : BYPASS_MODE,
-          applyToOpenSessions: true,
-        }),
-      });
-      state.serverState = await api('/api/state');
-      renderPermissions(state.serverState.defaults);
-      const scope = applied ? ` — ${applied} open session${applied === 1 ? '' : 's'} too` : '';
-      toast(on ? `Asking again${scope}` : `Nothing will ask${scope}`);
-    } catch (err) {
-      toast(err.message);
-      toggle.disabled = false;
-    }
-  });
-  head.appendChild(toggle);
-  row.appendChild(head);
-
-  row.appendChild(
-    el(
-      'p',
-      'small muted',
-      on
-        ? 'Every tool runs the moment the agent asks for it — edits, shell commands, ' +
-            'deletions, network calls. Nothing reaches this screen.'
-        : 'Runs every tool without asking, in this and every session. Convenient when ' +
-            'you are away from the Mac; there is nothing to catch a bad command.',
-    ),
+  const { section, card } = group('Permissions');
+  card.appendChild(
+    row({
+      dot: on ? 'error' : 'idle',
+      name: 'Never ask for permission',
+      detail: on ? 'Nothing reaches this screen' : 'Every tool waits for you',
+      control: toggle(on, async (wanted, input) => {
+        input.disabled = true;
+        try {
+          const { applied } = await api('/api/settings', {
+            method: 'POST',
+            body: JSON.stringify({
+              defaultPermissionMode: wanted ? BYPASS_MODE : 'default',
+              applyToOpenSessions: true,
+            }),
+          });
+          state.serverState = await api('/api/state');
+          renderPermissions(state.serverState.defaults);
+          const scope = applied ? ` — ${applied} open session${applied === 1 ? '' : 's'} too` : '';
+          toast(wanted ? `Nothing will ask${scope}` : `Asking again${scope}`);
+        } catch (err) {
+          toast(err.message);
+          input.checked = !wanted;
+          input.disabled = false;
+        }
+      }),
+      note: el(
+        'p',
+        null,
+        on
+          ? 'Every tool runs the moment the agent asks for it — edits, shell commands, ' +
+              'deletions, network calls.'
+          : 'Turn this on to run every tool without asking, in this and every session. ' +
+              'Convenient when you are away from the Mac; there is nothing to catch a bad command.',
+      ),
+    }),
   );
-  container.appendChild(row);
+  container.appendChild(section);
 }
 
 async function openSettings() {
@@ -1496,53 +1524,59 @@ async function openSettings() {
       body.appendChild(warn);
     }
 
-    const urls = el('div', 'url-list');
-    for (const u of data.urls) {
-      const row = el('div', 'url-row');
-      row.appendChild(el('span', null, u.url));
-      row.appendChild(el('span', 'tag', u.kind));
-      urls.appendChild(row);
-    }
-    body.appendChild(urls);
-
-    body.appendChild(el('label', null, 'Tailscale'));
+    // --- addresses ------------------------------------------------------------
     const ts = data.tailscale;
-    body.appendChild(
-      el(
-        'p',
-        'small muted',
-        !ts
-          ? 'Not installed on the host. Install Tailscale to reach this machine from outside your network.'
-          : ts.running
-            ? `Connected as ${ts.dnsName || ts.ips?.[0]}`
-            : `Tailscale is ${ts.backendState}. Run "tailscale up" on the host.`,
-      ),
+    const addresses = group(
+      'Reachable at',
+      !ts
+        ? 'Tailscale is not installed. Install it to reach this Mac from outside your network.'
+        : ts.running
+          ? `Tailscale connected as ${ts.dnsName || ts.ips?.[0]}`
+          : `Tailscale is ${ts.backendState}. Run "tailscale up" on the host.`,
     );
+    addresses.card.classList.add('boxed');
+    for (const u of data.urls) {
+      const line = el('div', 's-row');
+      const text = el('div', 's-row-text');
+      text.appendChild(el('strong', 'address-url', u.url));
+      text.appendChild(el('span', null, u.label || u.kind));
+      line.appendChild(text);
+      line.appendChild(
+        action('Copy', async (button) => {
+          button.textContent = (await copyText(u.url)) ? 'Copied' : 'Failed';
+          setTimeout(() => {
+            button.textContent = 'Copy';
+          }, 1600);
+        }, { neutral: true }),
+      );
+      addresses.card.appendChild(line);
+    }
+    body.appendChild(addresses.section);
 
-    if (data.devices) {
-      body.appendChild(el('label', null, `Paired devices (${data.devices.length})`));
+    // --- paired devices -------------------------------------------------------
+    if (data.devices?.length) {
+      const devices = group(`Paired devices (${data.devices.length})`);
       for (const device of data.devices) {
-        const row = el('div', 'device-row');
-        const info = el('div');
-        info.appendChild(el('div', null, device.name));
-        info.appendChild(el('div', 'small muted', `last seen ${relativeTime(Date.parse(device.lastSeenAt))}`));
-        row.appendChild(info);
-        const revoke = el('button', null, 'Revoke');
-        revoke.addEventListener('click', async () => {
-          await api(`/api/devices/${device.id}`, { method: 'DELETE' });
-          toast('Device revoked');
-          openSettings();
-        });
-        row.appendChild(revoke);
-        body.appendChild(row);
+        devices.card.appendChild(
+          row({
+            name: device.name,
+            detail: `last seen ${relativeTime(Date.parse(device.lastSeenAt))}`,
+            control: action('Revoke', async () => {
+              await api(`/api/devices/${device.id}`, { method: 'DELETE' });
+              toast('Device revoked');
+              openSettings();
+            }, { neutral: true }),
+          }),
+        );
       }
+      body.appendChild(devices.section);
     }
 
     const clients = data.connectedClients ?? 0;
     body.appendChild(
       el(
         'p',
-        'small muted',
+        'small muted center',
         `Daemon v${data.version} on ${data.hostname} · ${clients} client${clients === 1 ? '' : 's'} connected`,
       ),
     );

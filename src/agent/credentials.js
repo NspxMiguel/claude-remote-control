@@ -35,13 +35,6 @@ export const CREDENTIAL_SPECS = {
       'prints a token to paste here. A console API key works too, and is billed per token ' +
       'instead of against your plan.',
   },
-  acp: {
-    envVar: 'CURSOR_API_KEY',
-    label: 'Cursor API key',
-    placeholder: 'key_…',
-    login: 'agent login',
-    loginHint: 'Run `agent login` on the host, or paste a key from cursor.com/dashboard.',
-  },
   antigravity: {
     envVar: 'GEMINI_API_KEY',
     label: 'Gemini API key',

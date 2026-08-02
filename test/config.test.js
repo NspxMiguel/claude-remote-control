@@ -66,12 +66,12 @@ describe('loadConfig', () => {
 
   test('an override of something absent leaves it absent', () => {
     const config = loadConfig();
-    delete config.acpExecutable;
+    delete config.antigravityExecutable;
     saveConfig(config);
 
-    overrideConfig(config, 'acpExecutable', '/tmp/agent');
+    overrideConfig(config, 'antigravityExecutable', '/tmp/agent');
     saveConfig(config);
-    assert.ok(!('acpExecutable' in onDisk()), 'nothing invented on the way out');
+    assert.ok(!('antigravityExecutable' in onDisk()), 'nothing invented on the way out');
   });
 
   test('the environment cannot leak a token into the file', () => {

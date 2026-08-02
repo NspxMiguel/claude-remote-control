@@ -12,7 +12,7 @@ CSS and HTML I can drop in, not mood boards or vague direction.
 ## What the app is
 
 **Claude Remote Control** — a small daemon runs on my Mac and drives my coding
-agent (Claude Code, Cursor or Google Antigravity). A PWA on my phone is the
+agent (Claude Code or Google Antigravity). A PWA on my phone is the
 interface. I chat with the agent, watch what it does to my files, and approve or
 deny each dangerous action, from anywhere on my tailnet.
 
@@ -37,7 +37,7 @@ calls, which expand to show the individual commands and their output.
 - **Safe areas** on iOS (notch and home indicator) via `env(safe-area-inset-*)`,
   and `100dvh` — the on-screen keyboard must never cover the composer.
 - **The accent colour is dynamic.** It follows the agent in the current session:
-  Claude orange `#e0855f`, Antigravity blue `#7aa5f0`, Cursor purple `#b98ce6`,
+  Claude orange `#e0855f`, Antigravity blue `#7aa5f0`,
   set on `.app[data-agent="…"]`. Everything accented must derive from
   `var(--accent)` — never hard-code those hexes anywhere else.
 

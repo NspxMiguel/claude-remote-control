@@ -220,6 +220,22 @@ describe('a turn', () => {
     await driver.close();
   });
 
+  test('the session folder is put in the workspace, not just used as cwd', async () => {
+    // Caught against the real binary: with the folder only as the process cwd,
+    // agy wrote into ~/.gemini/antigravity-cli/scratch and said it was done.
+    // The screen was honest about it; the file was just somewhere nobody
+    // picked. --add-dir is what actually decides where it works.
+    const runs = argvLog();
+    const { driver, events } = await startDriver({});
+    driver.send('hello');
+    await waitFor(events, settled, 'the turn to finish');
+
+    const argv = runs()[0];
+    const dirs = argv.reduce((all, arg, i) => (arg === '--add-dir' ? [...all, argv[i + 1]] : all), []);
+    assert.ok(dirs.includes(WORK), `expected --add-dir ${WORK}, got ${JSON.stringify(dirs)}`);
+    await driver.close();
+  });
+
   test('bypassPermissions becomes the skip flag, and default passes no mode', async () => {
     const runs = argvLog();
     const bypass = await startDriver({ permissionMode: 'bypassPermissions' });

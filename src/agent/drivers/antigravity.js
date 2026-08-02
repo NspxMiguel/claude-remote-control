@@ -188,7 +188,13 @@ class AntigravityDriver {
     this.permissionMode = permissionMode || 'default';
     this.effort = options.effort || config.antigravityEffort || null;
     this.printTimeout = options.printTimeout || config.antigravityPrintTimeout || null;
-    this.addDirs = options.addDirs || config.antigravityAddDirs || [];
+    // The session's folder has to be *in the workspace*, not merely the process
+    // working directory. Without it, agy writes into its own scratch — I asked
+    // it for a file in a project I had picked, and it landed in
+    // ~/.gemini/antigravity-cli/scratch, reported as done. Nothing was wrong on
+    // screen; the file was simply somewhere else.
+    const extra = options.addDirs || config.antigravityAddDirs || [];
+    this.addDirs = [...new Set([this.cwd, ...extra])];
     this.emit = typeof emit === 'function' ? emit : () => {};
 
     /** Set from init/result, and passed to every later turn as `--conversation`. */

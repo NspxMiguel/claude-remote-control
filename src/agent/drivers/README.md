@@ -2,7 +2,7 @@
 
 A driver knows how to talk to one coding agent. The session layer above it is
 agent-agnostic: it owns the feed, the status, and the pending permissions, and
-it never knows whether the thing on the other end is Claude Code, Cursor or
+it never knows whether the thing on the other end is Claude Code or
 Antigravity.
 
 ## The contract

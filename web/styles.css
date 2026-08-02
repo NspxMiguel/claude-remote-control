@@ -1481,3 +1481,23 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   line-height: 1.5;
 }
 .install-steps li::marker { color: var(--accent); }
+
+/* A row that needs more than one line under it — a hint, a command, a form.
+ * It stays part of the card, so the divider still separates settings rather
+ * than fragments of one. */
+.s-row-extra {
+  display: grid;
+  gap: var(--s2);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--border-soft);
+}
+.s-card > .s-row-extra:last-child { border-bottom: none; padding-bottom: 0; }
+.s-row-extra > .s-row { border-bottom: none; padding-bottom: 0; }
+.s-row-extra > p { margin: 0 var(--s1); font-size: var(--t-meta); color: var(--text-dim); line-height: 1.55; }
+
+/* The settings sheet is four containers of groups stacked in one scroller, so
+ * the space between groups has to come from the groups themselves — otherwise
+ * one group's last line sits directly under the next group's heading. */
+#perms-body, #setup-body, #settings-body, #agents-body { display: grid; gap: var(--s7); }
+#perms-body:not(:empty), #setup-body:not(:empty), #settings-body:not(:empty) { margin-bottom: var(--s7); }
+.s-group + .s-group { margin-top: var(--s7); }

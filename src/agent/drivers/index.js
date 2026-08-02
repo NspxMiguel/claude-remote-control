@@ -3,10 +3,9 @@
  * ./README.md; the session layer above them is agent-agnostic.
  */
 import * as claudeCode from './claude-code.js';
-import * as acp from './acp.js';
 import * as antigravity from './antigravity.js';
 
-export const DRIVERS = [claudeCode, acp, antigravity];
+export const DRIVERS = [claudeCode, antigravity];
 
 export const DEFAULT_DRIVER = claudeCode.id;
 
