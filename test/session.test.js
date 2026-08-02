@@ -171,6 +171,27 @@ describe('session lifecycle', () => {
   });
 });
 
+describe('failure reporting', () => {
+  test('a missing Claude Code install explains the fix in this app’s terms', async () => {
+    const previous = config.claudeExecutable;
+    config.claudeExecutable = '/nonexistent/claude-binary';
+    const session = manager.create({ cwd: WORK });
+    try {
+      await waitFor(session, (s) => s.status === 'error', 'the failure to surface', 20000);
+      assert.match(session.lastError, /could not be found/i);
+      assert.match(session.lastError, /claudeExecutable/, 'names the config key to set');
+      assert.ok(
+        !/pathToClaudeCodeExecutable/.test(session.lastError),
+        'does not leak SDK option names at the user',
+      );
+      assert.ok(session.feed.items.some((i) => i.kind === 'error'), 'the phone sees it in the feed');
+    } finally {
+      config.claudeExecutable = previous;
+      await manager.close(session.id);
+    }
+  });
+});
+
 describe('image attachments', () => {
   // A 1x1 PNG, base64.
   const PIXEL =

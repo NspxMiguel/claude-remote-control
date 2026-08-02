@@ -70,15 +70,33 @@ function validateImages(images) {
   });
 }
 
-/** Turn the SDK's terse auth failures into something actionable on a phone. */
+/**
+ * Turn the SDK's terse failures into something a person holding a phone can act
+ * on. These messages are the whole error UI on a small screen, so they name the
+ * fix in this app's own terms rather than the SDK's.
+ */
 function friendlyError(text) {
-  if (/not logged in|authentication_failed|invalid api key|oauth/i.test(text || '')) {
+  const message = text || '';
+
+  if (/not logged in|authentication_failed|invalid api key|oauth/i.test(message)) {
     return (
       'Claude Code is not logged in on this machine. On the host, run `claude` in a ' +
       'terminal and sign in with /login (or set ANTHROPIC_API_KEY), then start a new session.'
     );
   }
-  return text;
+  if (/binary not found|ENOENT|could not find claude|not found at/i.test(message)) {
+    return (
+      'Claude Code could not be found on this machine. Install it, or set ' +
+      '"claudeExecutable" to its full path in ~/.claude-remote-control/config.json.'
+    );
+  }
+  if (/rate.?limit/i.test(message)) {
+    return 'Rate limited by the API. Wait a moment and try again.';
+  }
+  if (/credit|billing|quota/i.test(message)) {
+    return 'The API rejected the request for billing reasons — check your Claude plan or credits.';
+  }
+  return message;
 }
 
 /**
