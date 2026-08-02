@@ -1,0 +1,56 @@
+#!/usr/bin/expect -f
+#
+# Drives `claude setup-token` from the daemon.
+#
+# That command refuses to run without a terminal — piped, it prints nothing and
+# exits — so this wraps it in a pty. expect ships with macOS, which keeps the
+# daemon free of a native pty dependency.
+#
+# The protocol with the daemon is line-based on stdout:
+#   CRC_URL:<authorisation url>   the link to open and approve
+#   CRC_TOKEN:<token>             the credential, once the code is accepted
+#   CRC_ERROR:<message>           anything that went wrong
+# The daemon writes the authorisation code to stdin when the user has it.
+
+log_user 0
+set timeout 300
+
+set command [lindex $argv 0]
+if {$command eq ""} { set command "claude" }
+
+spawn $command setup-token
+
+# The CLI prints the URL twice — once as an OSC-8 hyperlink target and once as
+# visible text, which run together in the raw stream. Anchor on the query so a
+# concatenated pair cannot be captured as one URL.
+expect {
+  -re {(https://[^\s\x1b]*oauth/authorize\?[^\s\x1b]*state=[A-Za-z0-9_\-]+)} {
+    puts "CRC_URL:$expect_out(1,string)"
+    flush stdout
+  }
+  timeout { puts "CRC_ERROR:timed out waiting for the sign-in link"; exit 1 }
+  eof { puts "CRC_ERROR:the CLI exited before printing a link"; exit 1 }
+}
+
+# Wait for the daemon to hand over the code the user pasted.
+set code ""
+while {$code eq ""} {
+  if {[gets stdin line] < 0} { puts "CRC_ERROR:cancelled"; exit 1 }
+  set code [string trim $line]
+}
+
+send -- "$code\r"
+
+expect {
+  -re {(sk-ant-oat[A-Za-z0-9_\-]+)} {
+    puts "CRC_TOKEN:$expect_out(1,string)"
+    flush stdout
+    exit 0
+  }
+  -re {(?i)(invalid|incorrect|failed|error)} {
+    puts "CRC_ERROR:the code was not accepted"
+    exit 1
+  }
+  timeout { puts "CRC_ERROR:timed out waiting for the token"; exit 1 }
+  eof { puts "CRC_ERROR:the CLI exited before returning a token"; exit 1 }
+}

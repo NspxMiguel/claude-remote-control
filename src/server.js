@@ -323,7 +323,7 @@ export class RemoteControlServer {
 
     // --- state ---------------------------------------------------------------------
     if (route === 'state' && method === 'GET') {
-      const { urls, tailscale } = await reachableUrls(this.config.port);
+      const { urls, tailscale, localOnly } = await reachableUrls(this.config.port, this.config.host);
       const { detectDrivers } = await import('./agent/drivers/index.js');
       json(res, 200, {
         agents: await detectDrivers(this.config),
@@ -333,6 +333,8 @@ export class RemoteControlServer {
         identity: identity.kind,
         urls,
         tailscale,
+        localOnly,
+        boundTo: this.config.host,
         sessions: this.sessions.list(),
         defaults: {
           cwd: this.config.defaultCwd,
@@ -512,6 +514,28 @@ export class RemoteControlServer {
       this.config.defaultCwd = target;
       saveConfig(this.config);
       json(res, 200, { defaultCwd: target, allowedRoots: this.config.allowedRoots });
+      return;
+    }
+
+    // --- signing in -------------------------------------------------------------------
+    const loginMatch = route.match(/^agents\/([^/]+)\/login$/);
+    if (loginMatch && method === 'POST') {
+      const { startLogin } = await import('./agent/login.js');
+      json(res, 200, await startLogin(this.config, loginMatch[1]));
+      return;
+    }
+
+    if (route === 'login/complete' && method === 'POST') {
+      const body = await readJsonBody(req);
+      const { completeLogin } = await import('./agent/login.js');
+      json(res, 200, await completeLogin(this.config, body.loginId, body.code));
+      return;
+    }
+
+    if (route === 'login/cancel' && method === 'POST') {
+      const body = await readJsonBody(req);
+      const { cancelLogin } = await import('./agent/login.js');
+      json(res, 200, { cancelled: cancelLogin(body.loginId) });
       return;
     }
 

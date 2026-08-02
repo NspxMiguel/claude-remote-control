@@ -46,6 +46,9 @@ final class DoctorModel: ObservableObject {
         lastCheckedAt = Date()
     }
 
+    /// The same round-trip the panel makes, callable before the UI exists.
+    nonisolated static func selfCheckReport() -> DoctorReport { run() }
+
     private nonisolated static func run() -> DoctorReport {
         do {
             let capture = try NodeRuntime.runCRC(["doctor", "--json"])

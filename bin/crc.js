@@ -58,7 +58,7 @@ function bestUrl(urls) {
 }
 
 async function printAccessInfo(config) {
-  const { urls, tailscale } = await reachableUrls(config.port);
+  const { urls, tailscale, localOnly } = await reachableUrls(config.port, config.host);
   const best = bestUrl(urls);
   const pairUrl = `${best.url}/#token=${config.token}`;
 
@@ -172,7 +172,7 @@ async function cmdDoctor(args) {
 
 async function cmdPair() {
   const config = loadConfig();
-  const { urls } = await reachableUrls(config.port);
+  const { urls } = await reachableUrls(config.port, config.host);
   const best = bestUrl(urls);
   const pairUrl = `${best.url}/#token=${config.token}`;
 
@@ -188,7 +188,7 @@ async function cmdPair() {
 
 async function cmdStatus() {
   const config = loadConfig();
-  const { urls, tailscale } = await reachableUrls(config.port);
+  const { urls, tailscale, localOnly } = await reachableUrls(config.port, config.host);
 
   console.log();
   console.log(`  ${bold('Config')}      ${CONFIG_PATH}`);

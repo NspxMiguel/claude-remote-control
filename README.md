@@ -59,6 +59,17 @@ Not sure? Ask:
 npx crc doctor          # checks Node, the agent, credentials, the port and Tailscale
 ```
 
+## Install on macOS
+
+```bash
+brew tap NspxMiguel/tap                     # adds my tap to Homebrew
+brew install --cask claude-remote-control   # builds the app on your machine
+```
+
+A `>_` appears in the menu bar: start and stop the daemon, copy an address, show
+the pairing QR code, and fix whatever `crc doctor` is complaining about without
+opening a terminal — see [`mac/`](mac/).
+
 ## Quick start
 
 ```bash

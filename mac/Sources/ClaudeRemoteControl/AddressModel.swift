@@ -24,12 +24,25 @@ final class AddressModel: ObservableObject {
     static let shared = AddressModel()
 
     @Published private(set) var urls: [ReachableURL] = []
-    @Published private(set) var tailscale: TailscaleStatus?
     @Published private(set) var pairingURL: String?
 
     private init() {}
 
-    func refresh(port: Int) async {
+    func refresh(port: Int, host: String) async {
+        // A daemon bound to one address cannot answer on the others, and an
+        // address that cannot answer is worse than no address at all — you only
+        // find out standing in another room holding a phone.
+        let boundToAll = ["0.0.0.0", "::", ""].contains(host)
+        if !boundToAll {
+            let loopback = ["127.0.0.1", "localhost", "::1"].contains(host)
+            let bound = loopback
+                ? [ReachableURL(url: "http://localhost:\(port)", kind: .local, label: "This machine only")]
+                : [ReachableURL(url: "http://\(host):\(port)", kind: .lan, label: "Bound to \(host)")]
+            urls = bound
+            pairingURL = pairing(for: bound)
+            return
+        }
+
         let status = await Task.detached { Self.tailscaleStatus() }.value
         var found: [ReachableURL] = []
 
@@ -52,16 +65,15 @@ final class AddressModel: ObservableObject {
         }
         found.append(ReachableURL(url: "http://localhost:\(port)", kind: .local, label: "This machine"))
 
-        tailscale = status
         urls = found
+        pairingURL = pairing(for: found)
+    }
 
-        // Same shape `crc pair` prints: the phone reads the token out of the
-        // fragment, which never reaches a server log.
-        if let token = DaemonConfig.load()?.token, let best = best(of: found) {
-            pairingURL = "\(best.url)/#token=\(token)"
-        } else {
-            pairingURL = nil
-        }
+    /// Same shape `crc pair` prints: the phone reads the token out of the
+    /// fragment, which never reaches a server log.
+    private func pairing(for candidates: [ReachableURL]) -> String? {
+        guard let token = DaemonConfig.load()?.token, let best = best(of: candidates) else { return nil }
+        return "\(best.url)/#token=\(token)"
     }
 
     /// The address that works from the most places.
@@ -125,9 +137,10 @@ final class AddressModel: ObservableObject {
 
     // MARK: - Tailscale
 
-    struct TailscaleStatus: Equatable {
+    /// Only the tailnet name matters here: whether Tailscale is healthy is the
+    /// doctor's job to report, not this list's.
+    private struct TailscaleStatus {
         let running: Bool
-        let backendState: String
         let dnsName: String?
     }
 
@@ -167,7 +180,6 @@ final class AddressModel: ObservableObject {
 
         return TailscaleStatus(
             running: payload.BackendState == "Running",
-            backendState: payload.BackendState ?? "Unknown",
             dnsName: (dnsName?.isEmpty == false) ? dnsName : nil
         )
     }

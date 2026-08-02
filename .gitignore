@@ -8,3 +8,4 @@ coverage/
 dist/
 .crc-attachments/
 .agy-demo/
+mac/.build

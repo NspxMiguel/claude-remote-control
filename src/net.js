@@ -65,8 +65,28 @@ export async function tailscaleInfo() {
   }
 }
 
-/** Candidate base URLs for reaching this daemon, best route first. */
-export async function reachableUrls(port) {
+/**
+ * Base URLs for reaching this daemon, best route first.
+ *
+ * `host` is the address the daemon actually bound to. Listing a LAN or
+ * tailnet address while listening only on loopback would hand out addresses
+ * that cannot possibly answer — which is exactly the kind of thing you only
+ * discover standing in another room holding a phone.
+ */
+export async function reachableUrls(port, host = '0.0.0.0') {
+  const boundToAll = host === '0.0.0.0' || host === '::' || host === '';
+  if (!boundToAll) {
+    const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+    return {
+      urls: loopback
+        ? [{ url: `http://localhost:${port}`, kind: 'local', label: 'This machine only' }]
+        : [{ url: `http://${host}:${port}`, kind: 'bound', label: `Bound to ${host}` }],
+      tailscale: await tailscaleInfo(),
+      boundTo: host,
+      localOnly: loopback,
+    };
+  }
+
   const urls = [];
   const ts = await tailscaleInfo();
 
@@ -87,5 +107,5 @@ export async function reachableUrls(port) {
     });
   }
   urls.push({ url: `http://localhost:${port}`, kind: 'local', label: 'This machine' });
-  return { urls, tailscale: ts };
+  return { urls, tailscale: ts, boundTo: host, localOnly: false };
 }

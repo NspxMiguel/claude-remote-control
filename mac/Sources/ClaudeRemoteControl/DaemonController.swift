@@ -23,12 +23,19 @@ final class DaemonController: ObservableObject {
     @Published private(set) var startedAt: Date?
     @Published private(set) var lastMessage: String?
     @Published private(set) var port: Int = DaemonConfig.defaultPort
+    @Published private(set) var host: String = DaemonConfig.defaultHost
 
     private var child: Process?
     private var poller: Task<Void, Never>?
 
     private init() {
-        port = DaemonConfig.load()?.port ?? DaemonConfig.defaultPort
+        readConfig()
+    }
+
+    private func readConfig() {
+        guard let config = DaemonConfig.load() else { return }
+        port = config.port
+        host = config.host
     }
 
     var isRunning: Bool {
@@ -46,7 +53,7 @@ final class DaemonController: ObservableObject {
     func start() {
         guard !isRunning, child == nil else { return }
 
-        port = DaemonConfig.load()?.port ?? DaemonConfig.defaultPort
+        readConfig()
         status = .starting
         lastMessage = nil
 
@@ -122,7 +129,7 @@ final class DaemonController: ObservableObject {
     }
 
     func refresh() async {
-        port = DaemonConfig.load()?.port ?? port
+        readConfig()
         let health = await Self.probeHealth(port: port)
 
         if let health {
@@ -178,7 +185,7 @@ final class DaemonController: ObservableObject {
 
     /// The daemon prints a QR code on startup; block-drawing rows are noise in
     /// a one-line status, so keep the last line that reads like prose.
-    private static func interestingLine(in text: String) -> String? {
+    private nonisolated static func interestingLine(in text: String) -> String? {
         text
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }

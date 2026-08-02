@@ -723,6 +723,38 @@ function toast(message) {
 }
 
 /**
+ * Run the agent's own sign-in from here: open its authorisation page, approve,
+ * paste the code back. The daemon drives the CLI's OAuth flow, so what gets
+ * stored bills the subscription rather than an API key.
+ */
+async function beginSignIn(agent, button) {
+  button.disabled = true;
+  button.textContent = 'Starting…';
+
+  let session;
+  try {
+    session = await api(`/api/agents/${agent.id}/login`, { method: 'POST' });
+  } catch (err) {
+    toast(err.message);
+    button.disabled = false;
+    button.textContent = `Sign in to ${agent.label}`;
+    return;
+  }
+
+  const sheet = $('#login-sheet');
+  $('#login-title').textContent = `Sign in to ${agent.label}`;
+  $('#login-open').href = session.url;
+  $('#login-code').value = '';
+  $('#login-error').hidden = true;
+  sheet.dataset.loginId = session.loginId;
+  sheet.hidden = false;
+  $('#login-code').focus();
+
+  button.disabled = false;
+  button.textContent = `Sign in to ${agent.label}`;
+}
+
+/**
  * Sign an agent in from the phone. Every agent here normally authenticates in a
  * terminal on the host, which is exactly what you do not have when you are away
  * from it — so an API key can be pasted instead, and the login command is shown
@@ -765,7 +797,19 @@ function renderAgentSettings(agents) {
         stored.appendChild(remove);
         row.appendChild(stored);
       } else {
-        row.appendChild(el('p', 'small muted', credential.loginHint));
+        // The good path: sign in with the account, no token handling at all.
+        if (agent.canSignIn) {
+          const signIn = el('button', 'primary wide', `Sign in to ${agent.label}`);
+          signIn.type = 'button';
+          signIn.addEventListener('click', () => beginSignIn(agent, signIn));
+          row.appendChild(signIn);
+          row.appendChild(
+            el('p', 'small muted', 'Opens the sign-in page. Approve it, paste the code back, done.'),
+          );
+          row.appendChild(el('p', 'small muted', 'Or paste a token or API key instead:'));
+        } else {
+          row.appendChild(el('p', 'small muted', credential.loginHint));
+        }
 
         const form = el('div', 'agent-key');
         const input = document.createElement('input');
@@ -1036,6 +1080,22 @@ async function openSettings() {
     state.serverState = data;
 
     body.appendChild(el('label', null, 'Reachable at'));
+
+    // Listing a LAN address while bound to loopback would send you chasing an
+    // address that cannot answer. Say what is actually true.
+    if (data.localOnly) {
+      const warn = el('div', 'notice-warn');
+      warn.appendChild(
+        el(
+          'p',
+          null,
+          'This daemon is listening on localhost only, so no phone can reach it. ' +
+            'Restart it with `crc start --host 0.0.0.0`, or set "host" in the config.',
+        ),
+      );
+      body.appendChild(warn);
+    }
+
     const urls = el('div', 'url-list');
     for (const u of data.urls) {
       const row = el('div', 'url-row');
@@ -1352,6 +1412,45 @@ function wireUp() {
       toast(err.message);
     }
   });
+
+  // Sign-in
+  $('#login-submit').addEventListener('click', async () => {
+    const sheet = $('#login-sheet');
+    const button = $('#login-submit');
+    const error = $('#login-error');
+    error.hidden = true;
+    button.disabled = true;
+    button.textContent = 'Signing in…';
+
+    try {
+      const result = await api('/api/login/complete', {
+        method: 'POST',
+        body: JSON.stringify({ loginId: sheet.dataset.loginId, code: $('#login-code').value }),
+      });
+      sheet.hidden = true;
+      toast(`Signed in to ${result.agent === 'claude-code' ? 'Claude' : result.agent}`);
+      state.serverState = await api('/api/state');
+      openSettings();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Finish signing in';
+    }
+  });
+
+  for (const close of document.querySelectorAll('.login-close')) {
+    close.addEventListener('click', async () => {
+      const sheet = $('#login-sheet');
+      sheet.hidden = true;
+      // Leaving the CLI waiting on a pty forever helps nobody.
+      await api('/api/login/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ loginId: sheet.dataset.loginId }),
+      }).catch(() => {});
+    });
+  }
 
   // Settings
   $('#open-settings').addEventListener('click', openSettings);

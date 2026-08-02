@@ -230,6 +230,28 @@
   </div>
 </div>
 
+<!-- Sign-in sheet ------------------------------------------------------------->
+<div id="login-sheet" class="sheet" hidden>
+  <div class="sheet-card">
+    <header class="sheet-head">
+      <h3 id="login-title">Sign in</h3>
+      <button class="icon-btn login-close" aria-label="Close" data-icon="close"></button>
+    </header>
+
+    <p class="muted small">Open the sign-in page, approve access, then paste the code it gives you.</p>
+
+    <a id="login-open" class="primary wide center-link" target="_blank" rel="noopener noreferrer">
+      Open the sign-in page
+    </a>
+
+    <label for="login-code">Authorisation code</label>
+    <input id="login-code" type="text" placeholder="Paste the code here" spellcheck="false"
+           autocomplete="off" autocapitalize="off" />
+    <button id="login-submit" class="ghost-btn wide">Finish signing in</button>
+    <p id="login-error" class="error" hidden></p>
+  </div>
+</div>
+
 <div id="toast" class="toast" hidden></div>
 
 <script src="/app.js" type="module"></script>

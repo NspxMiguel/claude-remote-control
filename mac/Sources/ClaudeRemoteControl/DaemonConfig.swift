@@ -7,12 +7,14 @@ import Foundation
 /// ever reads it.
 struct DaemonConfig: Decodable {
     let port: Int
+    let host: String
     let token: String?
 
     static let path = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude-remote-control/config.json")
 
     static let defaultPort = 8787
+    static let defaultHost = "0.0.0.0"
 
     static func load() -> DaemonConfig? {
         guard let data = try? Data(contentsOf: path) else { return nil }
@@ -20,12 +22,13 @@ struct DaemonConfig: Decodable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case port, token
+        case port, host, token
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? DaemonConfig.defaultPort
+        host = try container.decodeIfPresent(String.self, forKey: .host) ?? DaemonConfig.defaultHost
         token = try container.decodeIfPresent(String.self, forKey: .token)
     }
 }

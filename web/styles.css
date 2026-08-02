@@ -792,6 +792,25 @@ input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accen
   padding: 8px 4px;
 }
 
+.center-link {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  margin-top: 14px;
+}
+
+.notice-warn {
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  margin: 4px 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.notice-warn p { margin: 0; }
+
 .setup-command {
   display: flex; align-items: center; gap: 8px;
   margin-top: 10px;

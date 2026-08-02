@@ -1,0 +1,5 @@
+.build/
+.swiftpm/
+ClaudeRemoteControl.app/
+*.zip
+.DS_Store
