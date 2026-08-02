@@ -2,7 +2,7 @@
 import process from 'node:process';
 import QRCode from 'qrcode';
 
-import { CONFIG_PATH, loadConfig, saveConfig } from '../src/config.js';
+import { CONFIG_PATH, loadConfig, overrideConfig, saveConfig } from '../src/config.js';
 import { RemoteControlServer } from '../src/server.js';
 import { reachableUrls } from '../src/net.js';
 import { bold, cyan, dim, green, log, red, setVerbose, yellow } from '../src/log.js';
@@ -88,8 +88,10 @@ async function printAccessInfo(config) {
 
 async function cmdStart(args) {
   const config = loadConfig();
-  if (args.flags.port) config.port = Number(args.flags.port);
-  if (args.flags.host) config.host = String(args.flags.host);
+  // Overrides, not edits: `crc start --port 8790` is for this run. Assigning
+  // them would write them to disk the next time any setting is saved.
+  if (args.flags.port) overrideConfig(config, 'port', Number(args.flags.port));
+  if (args.flags.host) overrideConfig(config, 'host', String(args.flags.host));
   if (args.flags.verbose) setVerbose(true);
 
   const server = new RemoteControlServer(config);
@@ -136,7 +138,7 @@ async function cmdStart(args) {
 
 async function cmdDoctor(args) {
   const config = loadConfig();
-  if (args.flags.port) config.port = Number(args.flags.port);
+  if (args.flags.port) overrideConfig(config, 'port', Number(args.flags.port));
 
   const { runDoctor } = await import('../src/doctor.js');
   const { results, healthy } = await runDoctor(config);

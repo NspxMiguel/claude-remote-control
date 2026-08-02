@@ -7,7 +7,10 @@ import test, { after, describe } from 'node:test';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'crc-config-'));
 process.env.CRC_CONFIG_DIR = TMP;
 
-const { loadConfig, saveConfig, isPathAllowed, expandHome, CONFIG_PATH } = await import('../src/config.js');
+const { loadConfig, saveConfig, overrideConfig, isPathAllowed, expandHome, CONFIG_PATH } =
+  await import('../src/config.js');
+
+const onDisk = () => JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
@@ -41,6 +44,44 @@ describe('loadConfig', () => {
     process.env.CRC_PORT = '9999';
     assert.equal(loadConfig().port, 9999);
     delete process.env.CRC_PORT;
+  });
+
+  test('a runtime override never reaches the file', () => {
+    // The bug this pins: `crc start --port 8790` set config.port, then saving
+    // any unrelated setting wrote the whole live object — and the daemon came
+    // back on 8790 the next day, on a port nobody chose.
+    const config = loadConfig();
+    const port = onDisk().port;
+
+    overrideConfig(config, 'port', 8790);
+    assert.equal(config.port, 8790, 'the running daemon uses the override');
+
+    config.defaultModel = 'opus';
+    saveConfig(config);
+
+    assert.equal(onDisk().port, port, 'the file keeps the port it had');
+    assert.equal(onDisk().defaultModel, 'opus', 'the real edit is still saved');
+    assert.equal(loadConfig().port, port);
+  });
+
+  test('an override of something absent leaves it absent', () => {
+    const config = loadConfig();
+    delete config.acpExecutable;
+    saveConfig(config);
+
+    overrideConfig(config, 'acpExecutable', '/tmp/agent');
+    saveConfig(config);
+    assert.ok(!('acpExecutable' in onDisk()), 'nothing invented on the way out');
+  });
+
+  test('the environment cannot leak a token into the file', () => {
+    process.env.CRC_TOKEN = 'from-the-service-file';
+    const config = loadConfig();
+    assert.equal(config.token, 'from-the-service-file');
+
+    saveConfig(config);
+    assert.notEqual(onDisk().token, 'from-the-service-file');
+    delete process.env.CRC_TOKEN;
   });
 
   test('repairs an empty allowedRoots list', () => {

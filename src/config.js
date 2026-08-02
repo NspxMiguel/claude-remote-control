@@ -86,6 +86,34 @@ export function newToken() {
   return randomBytes(32).toString('base64url');
 }
 
+/**
+ * Values set for this run only — a `--port`, a `CRC_TOKEN` from a service file.
+ * Held under a symbol so `JSON.stringify` cannot see them, and restored to
+ * whatever is on disk when the config is written back.
+ */
+const RUNTIME_OVERRIDES = Symbol('runtime overrides');
+
+/**
+ * Override a setting for this process without persisting it.
+ *
+ * Without this, a one-off `--port 8790` becomes permanent the first time
+ * anything else is saved — the whole live object gets written, override and
+ * all, and the daemon comes back on the wrong port tomorrow.
+ */
+export function overrideConfig(config, key, value) {
+  if (value === undefined) return config;
+  let overrides = config[RUNTIME_OVERRIDES];
+  if (!overrides) {
+    overrides = {};
+    Object.defineProperty(config, RUNTIME_OVERRIDES, { value: overrides, enumerable: false });
+  }
+  // Remember the on-disk value the first time only: overriding twice in one
+  // run must not record the first override as if it came from the file.
+  if (!(key in overrides)) overrides[key] = config[key];
+  config[key] = value;
+  return config;
+}
+
 export function loadConfig() {
   ensureDir();
   let stored = {};
@@ -99,10 +127,11 @@ export function loadConfig() {
 
   const config = { ...DEFAULTS, ...stored };
 
-  // Environment overrides win, so a service file can set them without editing JSON.
-  if (process.env.CRC_PORT) config.port = Number(process.env.CRC_PORT);
-  if (process.env.CRC_HOST) config.host = process.env.CRC_HOST;
-  if (process.env.CRC_TOKEN) config.token = process.env.CRC_TOKEN;
+  // Environment overrides win, so a service file can set them without editing
+  // JSON — and without leaking into it either, least of all the token.
+  if (process.env.CRC_PORT) overrideConfig(config, 'port', Number(process.env.CRC_PORT));
+  if (process.env.CRC_HOST) overrideConfig(config, 'host', process.env.CRC_HOST);
+  if (process.env.CRC_TOKEN) overrideConfig(config, 'token', process.env.CRC_TOKEN);
 
   let dirty = false;
   if (!config.token) {
@@ -130,7 +159,9 @@ export function loadConfig() {
 
 export function saveConfig(config) {
   ensureDir();
-  const { ...persisted } = config;
+  // Put back whatever the file said for anything overridden this run, so saving
+  // an unrelated setting cannot make a temporary flag permanent.
+  const persisted = { ...config, ...(config[RUNTIME_OVERRIDES] || {}) };
   const tmp = `${CONFIG_PATH}.tmp`;
   fs.writeFileSync(tmp, `${JSON.stringify(persisted, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(tmp, CONFIG_PATH);
