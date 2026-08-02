@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Claude Remote Control">
+  <rect width="512" height="512" rx="114" fill="#0f0f10"/>
+  <g fill="none" stroke="#e0855f" stroke-width="38" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M150 154l104 102-104 102"/>
+    <path d="M286 358h108"/>
+  </g>
+</svg>

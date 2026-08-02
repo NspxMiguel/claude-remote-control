@@ -1,0 +1,28 @@
+# systemd user service for claude-remote-control.
+#
+#   1. Edit WorkingDirectory and ExecStart to match your install.
+#   2. cp scripts/claude-remote-control.service ~/.config/systemd/user/
+#   3. systemctl --user daemon-reload
+#      systemctl --user enable --now claude-remote-control
+#   4. Keep it running after logout: sudo loginctl enable-linger "$USER"
+#
+# Logs: journalctl --user -u claude-remote-control -f
+
+[Unit]
+Description=Claude Remote Control daemon
+Documentation=https://github.com/NspxMiguel/claude-remote-control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/claude-remote-control
+ExecStart=/usr/bin/node %h/claude-remote-control/bin/crc.js start
+Restart=on-failure
+RestartSec=5
+
+# Claude Code shells out to git, rg and the like.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin
+
+[Install]
+WantedBy=default.target

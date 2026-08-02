@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<meta name="theme-color" content="#0f0f10" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Claude Remote" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Claude Remote Control</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<!-- Pairing gate ------------------------------------------------------------->
+<div id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" class="brand-mark" aria-hidden="true">
+        <path d="M4 6l5 6-5 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12.5 18h7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h1>Claude Remote Control</h1>
+        <p class="muted">Pair this device to drive Claude on your machine.</p>
+      </div>
+    </div>
+    <form id="pair-form">
+      <label for="pair-input">Pairing code or master token</label>
+      <input id="pair-input" type="text" inputmode="text" autocomplete="one-time-code"
+             placeholder="123456" spellcheck="false" required />
+      <label for="pair-name">Device name</label>
+      <input id="pair-name" type="text" placeholder="iPhone" spellcheck="false" />
+      <button type="submit" class="primary wide">Pair device</button>
+      <p id="pair-error" class="error" hidden></p>
+    </form>
+    <p class="hint">Run <code>crc pair</code> on your machine and scan the QR code, or paste the token from <code>crc token</code>.</p>
+  </div>
+</div>
+
+<!-- App shell ---------------------------------------------------------------->
+<div id="app" class="app" hidden>
+
+  <aside id="drawer" class="drawer">
+    <header class="drawer-head">
+      <div class="brand small">
+        <svg viewBox="0 0 24 24" class="brand-mark" aria-hidden="true">
+          <path d="M4 6l5 6-5 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12.5 18h7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+        <strong>Remote Control</strong>
+      </div>
+      <button id="drawer-close" class="icon-btn" aria-label="Close menu">✕</button>
+    </header>
+
+    <button id="new-session" class="new-session">
+      <span class="plus">+</span> New session
+    </button>
+
+    <nav class="session-groups">
+      <section>
+        <h2>Live <span id="live-count" class="count">0</span></h2>
+        <ul id="live-list" class="session-list"></ul>
+        <p id="live-empty" class="muted small">No sessions running. Start one above.</p>
+      </section>
+      <section>
+        <h2>On this machine</h2>
+        <p class="muted small">Sessions from Claude Desktop and the CLI. Watch live, then take over.</p>
+        <ul id="mirror-list" class="session-list"></ul>
+      </section>
+    </nav>
+
+    <footer class="drawer-foot">
+      <button id="open-settings" class="ghost-btn">Settings &amp; devices</button>
+      <span id="conn-state" class="conn"><i></i> connecting</span>
+    </footer>
+  </aside>
+  <div id="scrim" class="scrim"></div>
+
+  <main class="main">
+    <header class="topbar">
+      <button id="menu-btn" class="icon-btn" aria-label="Sessions">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      </button>
+      <div class="topbar-title">
+        <strong id="session-title">No session</strong>
+        <span id="session-sub" class="muted small"></span>
+      </div>
+      <button id="session-menu-btn" class="icon-btn" aria-label="Session options">
+        <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="5" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="19" r="1.8" fill="currentColor"/></svg>
+      </button>
+    </header>
+
+    <div id="feed" class="feed" aria-live="polite">
+      <div id="empty-state" class="empty">
+        <svg viewBox="0 0 24 24" class="empty-mark" aria-hidden="true">
+          <path d="M4 6l5 6-5 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12.5 18h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <h2>Claude, in your pocket</h2>
+        <p class="muted">Start a session to run commands, edit files and review what Claude is doing — from anywhere on your tailnet.</p>
+      </div>
+    </div>
+
+    <div id="scroll-pin" class="scroll-pin" hidden>
+      <button id="scroll-bottom">Jump to latest ↓</button>
+    </div>
+
+    <form id="composer" class="composer">
+      <div class="composer-row">
+        <textarea id="input" rows="1" placeholder="Message Claude…" enterkeyhint="send"></textarea>
+        <button id="send" type="submit" class="send" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12h13M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </button>
+        <button id="stop" type="button" class="send stop" aria-label="Stop" hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <div id="composer-meta" class="composer-meta"></div>
+    </form>
+  </main>
+</div>
+
+<!-- Permission sheet ---------------------------------------------------------->
+<div id="perm-sheet" class="sheet" hidden>
+  <div class="sheet-card perm">
+    <div class="perm-head">
+      <span class="perm-badge">Permission needed</span>
+      <h3 id="perm-title">Tool</h3>
+      <p id="perm-sub" class="muted small"></p>
+    </div>
+    <pre id="perm-detail" class="code-block"></pre>
+    <p id="perm-desc" class="muted small"></p>
+    <div class="perm-actions">
+      <button id="perm-deny" class="danger">Deny</button>
+      <button id="perm-allow-always" class="ghost-btn">Always allow</button>
+      <button id="perm-allow" class="primary">Allow once</button>
+    </div>
+    <p id="perm-queue" class="muted small center"></p>
+  </div>
+</div>
+
+<!-- New session sheet --------------------------------------------------------->
+<div id="new-sheet" class="sheet" hidden>
+  <div class="sheet-card">
+    <header class="sheet-head">
+      <h3>New session</h3>
+      <button class="icon-btn sheet-close" aria-label="Close">✕</button>
+    </header>
+    <label>Working directory</label>
+    <div class="picker">
+      <div id="picker-path" class="picker-path"></div>
+      <ul id="picker-list" class="picker-list"></ul>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="new-model">Model</label>
+        <select id="new-model">
+          <option value="sonnet">Sonnet</option>
+          <option value="opus">Opus</option>
+          <option value="haiku">Haiku</option>
+        </select>
+      </div>
+      <div>
+        <label for="new-perm">Permissions</label>
+        <select id="new-perm">
+          <option value="default">Ask me (recommended)</option>
+          <option value="acceptEdits">Auto-accept edits</option>
+          <option value="plan">Plan only</option>
+          <option value="bypassPermissions">Bypass all (dangerous)</option>
+        </select>
+      </div>
+    </div>
+    <button id="create-session" class="primary wide">Start session</button>
+  </div>
+</div>
+
+<!-- Session options sheet ------------------------------------------------------>
+<div id="opts-sheet" class="sheet" hidden>
+  <div class="sheet-card">
+    <header class="sheet-head">
+      <h3>Session</h3>
+      <button class="icon-btn sheet-close" aria-label="Close">✕</button>
+    </header>
+    <div id="opts-info" class="kv"></div>
+    <label for="opt-model">Model</label>
+    <select id="opt-model"></select>
+    <label for="opt-perm">Permission mode</label>
+    <select id="opt-perm">
+      <option value="default">Ask me</option>
+      <option value="acceptEdits">Auto-accept edits</option>
+      <option value="plan">Plan only</option>
+      <option value="bypassPermissions">Bypass all (dangerous)</option>
+    </select>
+    <div class="opts-actions">
+      <button id="opt-takeover" class="ghost-btn" hidden>Take over from here</button>
+      <button id="opt-close-session" class="danger">End session</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings sheet ------------------------------------------------------------->
+<div id="settings-sheet" class="sheet" hidden>
+  <div class="sheet-card">
+    <header class="sheet-head">
+      <h3>Settings</h3>
+      <button class="icon-btn sheet-close" aria-label="Close">✕</button>
+    </header>
+    <div id="settings-body"></div>
+    <button id="enable-notifs" class="ghost-btn wide">Enable permission alerts</button>
+    <button id="unpair" class="danger wide">Unpair this device</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "name": "claude-remote-control",
+  "version": "0.1.0",
+  "description": "Control Claude Code and Claude Desktop from your phone — a PWA chat client for your own machine, over LAN or Tailscale.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "crc": "bin/crc.js",
+    "claude-remote-control": "bin/crc.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "bin",
+    "src",
+    "web",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/crc.js start",
+    "status": "node bin/crc.js status",
+    "pair": "node bin/crc.js pair",
+    "test": "node --test \"test/*.test.js\"",
+    "icons": "node scripts/generate-icons.mjs"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "remote-control",
+    "pwa",
+    "tailscale",
+    "agent",
+    "mobile"
+  ],
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.3"
+  }
+}
