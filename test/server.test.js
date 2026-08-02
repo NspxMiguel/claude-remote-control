@@ -104,10 +104,28 @@ describe('authentication', () => {
 
     const state = await (await get('/api/state', token)).json();
     assert.equal(state.identity, 'device');
-    assert.equal(state.devices, undefined, 'device tokens cannot enumerate other devices');
+    // A paired device can already run commands as you, so it manages devices too.
+    assert.ok(Array.isArray(state.devices));
+    assert.ok(
+      state.devices.every((d) => d.token === undefined),
+      'device tokens are never handed back out',
+    );
+    assert.equal((await get('/api/pair/code', token, { method: 'POST' })).status, 200);
+  });
 
-    const forbidden = await get('/api/pair/code', token, { method: 'POST' });
-    assert.equal(forbidden.status, 403);
+  test('a device can revoke itself, which is how "sign out" works', async () => {
+    const { token, device } = await (
+      await fetch(`${base}/api/pair`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: config.token, name: 'Self-revoker' }),
+      })
+    ).json();
+
+    const res = await get(`/api/devices/${device.id}`, token, { method: 'DELETE' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { revoked: true, self: true });
+    assert.equal((await get('/api/state', token)).status, 401, 'the token stops working immediately');
   });
 
   test('pairing refuses a bad code', async () => {

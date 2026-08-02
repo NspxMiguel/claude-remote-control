@@ -316,10 +316,11 @@ export class RemoteControlServer {
           permissionMode: this.config.defaultPermissionMode,
           allowedRoots: this.config.allowedRoots,
         },
-        devices:
-          identity.kind === 'master'
-            ? this.config.devices.map(({ token, ...rest }) => rest)
-            : undefined,
+        // Tokens are never included. Any paired device can already run commands
+        // as you — including reading the config — so hiding the device list from
+        // one would be theatre, while being able to revoke a lost phone from the
+        // phone in your hand is genuinely useful.
+        devices: this.config.devices.map(({ token, ...rest }) => rest),
       });
       return;
     }
@@ -431,20 +432,19 @@ export class RemoteControlServer {
 
     // --- device management (master token only) --------------------------------------
     if (route === 'pair/code' && method === 'POST') {
-      if (identity.kind !== 'master') throw Object.assign(new Error('Master token required'), { status: 403 });
       json(res, 200, this.auth.createPairingCode());
       return;
     }
 
     const deviceMatch = route.match(/^devices\/([^/]+)$/);
     if (deviceMatch && method === 'DELETE') {
-      if (identity.kind !== 'master') throw Object.assign(new Error('Master token required'), { status: 403 });
-      json(res, 200, { revoked: this.auth.revokeDevice(deviceMatch[1]) });
+      const revoked = this.auth.revokeDevice(deviceMatch[1]);
+      // Revoking yourself is allowed — it is how "sign out everywhere" works.
+      json(res, 200, { revoked, self: identity.device?.id === deviceMatch[1] });
       return;
     }
 
     if (route === 'settings' && method === 'POST') {
-      if (identity.kind !== 'master') throw Object.assign(new Error('Master token required'), { status: 403 });
       const body = await readJsonBody(req);
       for (const key of ['defaultCwd', 'defaultModel', 'defaultPermissionMode']) {
         if (body[key] !== undefined) this.config[key] = body[key];

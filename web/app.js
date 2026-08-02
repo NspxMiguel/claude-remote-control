@@ -1200,6 +1200,17 @@ function wireUp() {
 
   // Settings
   $('#open-settings').addEventListener('click', openSettings);
+
+  $('#pair-another').addEventListener('click', async () => {
+    const output = $('#pair-code');
+    try {
+      const { code, expiresIn } = await api('/api/pair/code', { method: 'POST' });
+      output.textContent = `${code} — enter it on the other device within ${Math.round(expiresIn / 60)} min`;
+      output.hidden = false;
+    } catch (err) {
+      toast(err.message);
+    }
+  });
   $('#unpair').addEventListener('click', () => unpair(false));
   $('#enable-notifs').addEventListener('click', async () => {
     if (!('Notification' in window)) return toast('Notifications are unsupported here');

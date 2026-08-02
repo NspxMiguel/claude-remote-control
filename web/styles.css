@@ -14,6 +14,8 @@
   --text-faint: #6f6f7b;
   --accent: #e0855f;
   --accent-dim: #a8593a;
+  /* Text drawn on top of --accent; flips with the theme to stay readable. */
+  --on-accent: #17110d;
   --ok: #6fbf8b;
   --warn: #e0b95f;
   --danger: #e0685f;
@@ -41,6 +43,7 @@
     --text-faint: #8a8a95;
     --accent: #c0623a;
     --accent-dim: #a8593a;
+    --on-accent: #fff;
     --ok: #2f8a52;
     --warn: #9a7415;
     --danger: #c2372c;
@@ -76,7 +79,7 @@ code { font-family: var(--mono); font-size: 0.9em; }
 
 .primary {
   background: var(--accent);
-  color: #17110d;
+  color: var(--on-accent);
   font-weight: 600;
   padding: 12px 18px;
   border-radius: var(--radius-sm);
@@ -306,7 +309,7 @@ input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accen
   align-self: flex-end;
   max-width: min(88%, 640px);
   background: var(--accent);
-  color: #17110d;
+  color: var(--on-accent);
   padding: 10px 14px;
   border-radius: 18px 18px 4px 18px;
   white-space: pre-wrap;
@@ -543,7 +546,7 @@ input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accen
   width: 42px; height: 42px; flex: none;
   border-radius: 50%;
   background: var(--accent);
-  color: #17110d;
+  color: var(--on-accent);
   display: grid; place-items: center;
 }
 .send:disabled { opacity: .4; }
@@ -637,6 +640,18 @@ input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accen
   font-family: var(--sans); font-size: 10px; text-transform: uppercase;
   letter-spacing: .06em; color: var(--text-faint); flex: none;
 }
+.pair-code {
+  margin: 10px 0 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hi);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 15px;
+  text-align: center;
+  letter-spacing: .04em;
+}
+
 .device-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 10px 0; border-bottom: 1px solid var(--border-soft); font-size: 14px;

@@ -118,6 +118,10 @@ like an SSH key.
 - **Every request needs a token.** The master token lives in
   `~/.claude-remote-control/config.json` (mode `600`). Phones get their own
   device tokens at pairing time, revocable one by one.
+- **A paired device has full control of the machine.** It can run commands as
+  you, so it can also read that config file. Per-device tokens exist so you can
+  revoke one without rotating everything — they are hygiene, not a sandbox.
+  Pair only devices you'd hand your unlocked laptop to.
 - **Repeated bad tokens lock an address out** for five minutes.
 - **Sessions are confined** to `allowedRoots` (your home directory by default).
   Path traversal out of them is refused.
