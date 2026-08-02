@@ -1501,3 +1501,58 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 #perms-body, #setup-body, #settings-body, #agents-body { display: grid; gap: var(--s7); }
 #perms-body:not(:empty), #setup-body:not(:empty), #settings-body:not(:empty) { margin-bottom: var(--s7); }
 .s-group + .s-group { margin-top: var(--s7); }
+
+/* ---- voice and suggestions -------------------------------------------------- */
+
+/* Openers, above the composer, for a session with nothing in it yet. */
+.suggestions {
+  display: flex;
+  gap: var(--s2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 0 var(--s2) var(--s3);
+  margin: 0 calc(var(--s2) * -1);
+  scroll-padding: var(--s2);
+}
+.suggestions::-webkit-scrollbar { display: none; }
+.suggestion {
+  flex: none;
+  padding: var(--s2) var(--s4);
+  min-height: 36px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  white-space: nowrap;
+  transition: var(--accent-transition);
+}
+.suggestion:hover, .suggestion:active { color: var(--text); border-color: var(--accent-line); }
+
+/* The microphone, while it is listening. */
+#dictate.listening { color: var(--accent); }
+#dictate.listening::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+#dictate { position: relative; }
+
+/* A speaker on a finished reply. Dim until you go looking for it. */
+.speak-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 30px;
+  margin-left: var(--s2);
+  vertical-align: -8px;
+  border-radius: 50%;
+  color: var(--text-ghost);
+  transition: color var(--d1) var(--ease-out), background var(--d1) var(--ease-out);
+}
+.speak-btn:hover { color: var(--text-dim); background: var(--surface); }
+.speak-btn.speaking { color: var(--accent); background: var(--accent-dim, var(--surface)); }
+.speak-btn.speaking svg { animation: pulse 1.4s ease-in-out infinite; }

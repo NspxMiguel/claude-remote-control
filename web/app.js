@@ -16,6 +16,7 @@ const LAST_SESSION_KEY = 'crc.lastSession';
 /** Every address this Mac answered on, learned while connected. */
 const ADDRESSES_KEY = 'crc.addresses';
 const INSTALL_PROMPTED_KEY = 'crc.installPrompted';
+const NARRATE_KEY = 'crc.narrate';
 
 const state = {
   token: localStorage.getItem(TOKEN_KEY),
@@ -30,6 +31,8 @@ const state = {
   serverState: null,
   /** Images staged for the next message: { mediaType, data, url, name }. */
   pending: [],
+  /** Read every finished reply aloud, for when the phone is not in your hand. */
+  narrate: localStorage.getItem(NARRATE_KEY) === '1',
 };
 
 /** Anthropic recommends no side longer than this; bigger just wastes bandwidth. */
@@ -509,7 +512,16 @@ function setConn(status) {
 function viewFor(sessionId) {
   let view = state.views.get(sessionId);
   if (!view) {
-    view = { lastSeq: 0, nodes: new Map(), groups: new Map(), pinned: true };
+    view = {
+      lastSeq: 0,
+      nodes: new Map(),
+      groups: new Map(),
+      pinned: true,
+      /** Item ids already read aloud, so a re-render does not repeat them. */
+      spoken: new Set(),
+      /** False until the first batch has landed — see applyItems. */
+      primed: false,
+    };
     state.views.set(sessionId, view);
   }
   return view;
@@ -524,6 +536,21 @@ function applyItems(sessionId, items) {
 
   for (const item of items) {
     if (item.seq > view.lastSeq) view.lastSeq = item.seq;
+
+    // Prose that has stopped streaming is a finished thought, which is the
+    // only thing worth reading aloud — and only for the session on screen,
+    // and only if it arrived after we caught up. Without `primed`, opening a
+    // session or reconnecting would recite the entire history at you.
+    if (
+      view.primed &&
+      item.kind === 'text' &&
+      !item.streaming &&
+      sessionId === state.currentId &&
+      !view.spoken.has(item.id)
+    ) {
+      view.spoken.add(item.id);
+      maybeAutoNarrate(item.text);
+    }
 
     // A run of tool calls renders as one collapsible row containing the cards,
     // so the transcript reads as narration instead of a wall of tool output.
@@ -560,9 +587,60 @@ function applyItems(sessionId, items) {
 
   for (const group of touchedGroups) refreshGroup(group);
 
+  // Everything from here on is live, and may be spoken.
+  view.primed = true;
+  for (const item of items) if (item.kind === 'text') view.spoken.add(item.id);
+
   $('#empty-state').hidden = view.nodes.size > 0;
+  renderSuggestions();
   if (wasAtBottom || view.pinned) scrollToBottom();
   else $('#scroll-pin').hidden = false;
+}
+
+// ---------------------------------------------------------------------------
+// Something to say
+// ---------------------------------------------------------------------------
+
+/**
+ * Openers for a session with nothing in it yet.
+ *
+ * A blank box is the worst thing to hand someone standing at a bus stop. These
+ * are the things you actually ask an agent from a phone — orient me, check
+ * something, pick up where I left off — and they disappear the moment the
+ * conversation has anything in it.
+ */
+const OPENERS = [
+  { label: 'What is this project?', text: 'Give me a short tour of this project: what it is, how it is laid out, and how to run it.' },
+  { label: 'What changed recently?', text: 'Summarise the recent git history and what state the working tree is in.' },
+  { label: 'Anything broken?', text: 'Run the test suite and tell me briefly whether anything fails.' },
+  { label: 'What should I do next?', text: 'Look for TODOs, failing tests and obvious loose ends, then suggest what to pick up next.' },
+];
+
+function renderSuggestions() {
+  const container = $('#suggestions');
+  const session = currentSession();
+  // "Nothing yet" means nothing anyone said — a freshly started session already
+  // has a "Connected to…" line, and hiding the openers behind that would mean
+  // they are only ever visible for the half second before the agent starts.
+  const spoken = $('#feed').querySelector('.bubble-user, .item.assistant, .tool-group');
+  const empty = Boolean(session) && !session.readOnly && !spoken;
+
+  container.hidden = !empty;
+  if (!empty || container.dataset.filled === session.id) return;
+
+  container.innerHTML = '';
+  container.dataset.filled = session.id;
+  for (const opener of OPENERS) {
+    const chip = el('button', 'suggestion', opener.label);
+    chip.type = 'button';
+    chip.addEventListener('click', () => {
+      const input = $('#input');
+      input.value = opener.text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    });
+    container.appendChild(chip);
+  }
 }
 // ---------------------------------------------------------------------------
 // Image attachments
@@ -863,7 +941,91 @@ function updateTabTitle() {
 function setComposerEnabled(enabled, disabledHint = 'Read-only mirror', agentLabel) {
   $('#input').disabled = !enabled;
   $('#send').disabled = !enabled;
+  $('#dictate').disabled = !enabled;
   $('#input').placeholder = enabled ? `Message ${agentLabel || 'Claude'}…` : disabledHint;
+}
+
+// ---------------------------------------------------------------------------
+// Voice: talking to it, and it talking back
+// ---------------------------------------------------------------------------
+
+/** Loaded on demand — nobody pays for it until they press the microphone. */
+let voiceModule = null;
+const loadVoice = async () => (voiceModule ||= await import('./voice.js'));
+
+let stopDictation = null;
+
+async function toggleDictation() {
+  const voice = await loadVoice();
+  const button = $('#dictate');
+
+  if (stopDictation) {
+    stopDictation();
+    return;
+  }
+
+  const obstacle = voice.dictationObstacle();
+  if (obstacle) {
+    toast(obstacle);
+    return;
+  }
+
+  const input = $('#input');
+  // Dictation adds to whatever is already typed rather than replacing it.
+  const prefix = input.value ? `${input.value.trim()} ` : '';
+
+  try {
+    button.classList.add('listening');
+    stopDictation = voice.startDictation({
+      onText: (text) => {
+        input.value = prefix + text;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+      onEnd: () => {
+        stopDictation = null;
+        button.classList.remove('listening');
+        input.focus();
+      },
+      onError: (message) => toast(message),
+    });
+  } catch (err) {
+    button.classList.remove('listening');
+    stopDictation = null;
+    toast(err?.message || 'Could not start dictation.');
+  }
+}
+
+/** Read one reply aloud, or stop if this one is already being read. */
+async function narrateText(text, button) {
+  const voice = await loadVoice();
+  if (!voice.narrationSupported()) {
+    toast('This browser cannot read text aloud.');
+    return;
+  }
+
+  const wasThisOne = button?.classList.contains('speaking');
+  voice.stopNarration();
+  for (const node of document.querySelectorAll('.speak-btn.speaking')) {
+    node.classList.remove('speaking');
+  }
+  if (wasThisOne) return;
+
+  button?.classList.add('speaking');
+  const spoke = await voice.narrate(text, { onDone: () => button?.classList.remove('speaking') });
+  if (!spoke) {
+    button?.classList.remove('speaking');
+    toast('Nothing to read here — it is all code.');
+  }
+}
+
+/**
+ * Auto-narration, for when the phone is in a pocket or a car mount. Only the
+ * final prose of a turn is read: narrating every streamed fragment would talk
+ * over itself.
+ */
+function maybeAutoNarrate(text) {
+  if (!state.narrate || !text) return;
+  loadVoice().then((voice) => voice.narrate(text)).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1230,13 +1392,19 @@ function renderAgentNote() {
   note.textContent = missing.length ? `Note: ${missing.join(', ')}.` : '';
 }
 
-async function openPicker(startPath) {
-  const listNode = $('#picker-list');
-  const pathNode = $('#picker-path');
+/**
+ * Browse the host's directories.
+ *
+ * Used by two screens with the same behaviour and different destinations: the
+ * new-session sheet, and the setting that says where sessions start by default.
+ */
+async function openPicker(startPath, { list = '#picker-list', path = '#picker-path' } = {}) {
+  const listNode = $(list);
+  const pathNode = $(path);
 
   const load = async (target) => {
     const data = await api(`/api/fs?path=${encodeURIComponent(target)}`);
-    pathNode.textContent = data.path;
+    pathNode.textContent = prettyPath(data.path);
     pathNode.dataset.path = data.path;
     listNode.innerHTML = '';
 
@@ -1246,16 +1414,37 @@ async function openPicker(startPath) {
 
     for (const dir of data.dirs) {
       const li = el('li');
+      li.appendChild(icon('folder', { size: 16 }));
       li.appendChild(el('span', null, dir.name));
-      const row = document.createElement('span');
-      row.style.marginLeft = 'auto';
-      li.appendChild(row);
       li.addEventListener('click', () => load(dir.path).catch((e) => toast(e.message)));
       listNode.appendChild(li);
     }
   };
 
   await load(startPath);
+}
+
+/**
+ * Pick any folder on the Mac as the one new sessions start in.
+ *
+ * Settings gets out of the way first: two sheets at once stack their scrims
+ * and their text, and the result reads as a rendering fault. Closing it comes
+ * back automatically when this one is done.
+ */
+async function openDefaultFolderPicker(startPath) {
+  $('#settings-sheet').hidden = true;
+  $('#folder-sheet').hidden = false;
+  try {
+    await openPicker(startPath, { list: '#folder-list', path: '#folder-path' });
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+/** Leave the folder picker and put Settings back where it was. */
+function closeFolderPicker() {
+  $('#folder-sheet').hidden = true;
+  openSettings();
 }
 
 /**
@@ -1423,6 +1612,13 @@ async function renderSetup() {
 
   // --- where new sessions start -----------------------------------------------
   const folder = group('Project folder', prettyPath(data.defaultCwd));
+  folder.card.appendChild(
+    row({
+      name: 'Choose a folder',
+      detail: 'Anywhere on this Mac',
+      control: action('Browse', () => openDefaultFolderPicker(data.defaultCwd)),
+    }),
+  );
   const options = el('div', 'root-options');
   for (const root of data.suggestedRoots) {
     const choice = el('button', `root-choice${root === data.defaultCwd ? ' active' : ''}`, prettyPath(root));
@@ -1495,6 +1691,45 @@ function renderPermissions(defaults = {}) {
       ),
     }),
   );
+  container.appendChild(section);
+
+  renderVoiceSettings(container);
+}
+
+/** Reading replies aloud, and whether this browser can hear you at all. */
+function renderVoiceSettings(container) {
+  const { section, card } = group('Voice');
+
+  card.appendChild(
+    row({
+      dot: state.narrate ? 'idle' : '',
+      name: 'Read replies aloud',
+      detail: 'Skips code, paths and links',
+      control: toggle(state.narrate, async (wanted) => {
+        state.narrate = wanted;
+        localStorage.setItem(NARRATE_KEY, wanted ? '1' : '0');
+        const voice = await loadVoice();
+        if (!wanted) voice.stopNarration();
+        else voice.narrate('Reading replies aloud.');
+        renderPermissions(state.serverState?.defaults || {});
+      }),
+    }),
+  );
+
+  // Dictation is a property of the browser, not a setting — but when it is
+  // unavailable the microphone button needs to explain itself somewhere.
+  loadVoice().then((voice) => {
+    const obstacle = voice.dictationObstacle();
+    card.appendChild(
+      row({
+        dot: obstacle ? '' : 'idle',
+        name: 'Dictation',
+        detail: obstacle ? 'unavailable here' : 'hold the microphone and talk',
+        note: obstacle ? el('p', null, obstacle) : null,
+      }),
+    );
+  });
+
   container.appendChild(section);
 }
 
@@ -1655,6 +1890,35 @@ function wireUp() {
   });
 
   wireScanner();
+
+  // Project folder
+  $('#folder-close').addEventListener('click', closeFolderPicker);
+  $('#folder-use').addEventListener('click', async (event) => {
+    const chosen = $('#folder-path').dataset.path;
+    if (!chosen) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await api('/api/setup/default-cwd', { method: 'PUT', body: JSON.stringify({ path: chosen }) });
+      state.serverState = await api('/api/state');
+      toast(`New sessions start in ${prettyPath(chosen)}`);
+      closeFolderPicker();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  // Voice
+  $('#dictate').addEventListener('click', toggleDictation);
+  // One listener for every speaker button, present and future.
+  $('#feed').addEventListener('click', (event) => {
+    const button = event.target.closest?.('.speak-btn');
+    if (!button) return;
+    event.preventDefault();
+    narrateText(button.dataset.speak, button);
+  });
 
   // Address switching, when this one stopped answering
   $('#offline-close').addEventListener('click', () => {
@@ -1924,7 +2188,18 @@ function wireUp() {
   }
 
   // Settings
+  // Three ways in, because one of them was the bottom of a drawer nobody
+  // scrolled to: the gear in the drawer header, the row in the session sheet,
+  // and the original footer button.
   $('#open-settings').addEventListener('click', openSettings);
+  $('#open-settings-top').addEventListener('click', () => {
+    closeDrawer();
+    openSettings();
+  });
+  $('#opt-settings').addEventListener('click', () => {
+    $('#opts-sheet').hidden = true;
+    openSettings();
+  });
 
   $('#pair-another').addEventListener('click', async () => {
     const output = $('#pair-code');

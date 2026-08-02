@@ -64,6 +64,20 @@
   </div>
 </div>
 
+<!-- Pick the folder new sessions start in ------------------------------------->
+<div id="folder-sheet" class="sheet" hidden>
+  <div class="sheet-card">
+    <header class="sheet-head">
+      <h3>Project folder</h3>
+      <button id="folder-close" class="icon-btn" aria-label="Close" data-icon="close"></button>
+    </header>
+    <p class="muted small">New sessions start here. Anything you pick is added to the folders this app is allowed to touch.</p>
+    <div id="folder-path" class="picker-path"></div>
+    <ul id="folder-list" class="picker-list"></ul>
+    <button id="folder-use" class="primary wide">Use this folder</button>
+  </div>
+</div>
+
 <!-- Nowhere to connect ------------------------------------------------------->
 <div id="offline-sheet" class="sheet" hidden>
   <div class="sheet-card">
@@ -103,6 +117,7 @@
         </svg>
         <strong>Remote Control</strong>
       </div>
+      <button id="open-settings-top" class="icon-btn" aria-label="Settings" title="Settings" data-icon="gear"></button>
       <button id="drawer-close" class="icon-btn" aria-label="Close menu" data-icon="close"></button>
     </header>
 
@@ -160,6 +175,7 @@
     </div>
 
     <form id="composer" class="composer">
+      <div id="suggestions" class="suggestions" hidden></div>
       <div id="attachments" class="attachments" hidden></div>
       <div class="composer-row">
         <input id="file-input" type="file" accept="image/*" multiple hidden />
@@ -167,6 +183,7 @@
         <button id="attach" type="button" class="attach-btn" aria-label="Attach image">
           <svg viewBox="0 0 24 24" width="20" height="20"><path d="M21 11.5l-8.8 8.8a5 5 0 01-7.1-7.1l9-9a3.4 3.4 0 014.8 4.8l-9 9a1.8 1.8 0 01-2.5-2.5l8.3-8.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
+        <button id="dictate" type="button" class="attach-btn" aria-label="Dictate" data-icon="mic"></button>
         <div id="composer-meta" class="composer-meta"></div>
         <button id="send" type="submit" class="send" aria-label="Send">
           <svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12h13M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
@@ -257,6 +274,7 @@
       <option value="bypassPermissions">Bypass all (dangerous)</option>
     </select>
     <div class="opts-actions">
+      <button id="opt-settings" class="ghost-btn">Settings &amp; devices</button>
       <button id="opt-takeover" class="ghost-btn" hidden>Take over from here</button>
       <button id="opt-close-session" class="danger">End session</button>
     </div>

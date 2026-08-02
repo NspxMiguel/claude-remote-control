@@ -223,6 +223,21 @@ export function renderItem(item) {
         node.textContent = item.text;
       } else {
         node.innerHTML = renderMarkdown(item.text);
+        // Finished prose gets a speaker. Not while streaming: reading a
+        // half-written sentence out loud is worse than not reading it.
+        const speak = el('button', 'speak-btn');
+        speak.type = 'button';
+        speak.title = 'Read this aloud';
+        speak.setAttribute('aria-label', 'Read this aloud');
+        speak.appendChild(icon('speaker', { size: 15 }));
+        speak.dataset.speak = item.text;
+        // Trailing the last line of prose, not stranded on a line of its own:
+        // markdown wraps everything in blocks, so appending to the node itself
+        // pushes the button below the text.
+        const tail = [...node.children]
+          .reverse()
+          .find((child) => /^(P|LI|BLOCKQUOTE|H[1-6])$/.test(child.tagName));
+        (tail || node).appendChild(speak);
       }
       return withMeta(node, item);
     }

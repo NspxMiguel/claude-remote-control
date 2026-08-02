@@ -1,6 +1,6 @@
 /* Offline shell for the PWA. Live data always comes from the network. */
 
-const CACHE = 'crc-shell-v5';
+const CACHE = 'crc-shell-v6';
 const SHELL = [
   '/',
   '/index.html',
@@ -13,6 +13,7 @@ const SHELL = [
   // Imported on demand when someone presses Scan — which may well be the
   // moment they have no working connection to fetch it over.
   '/scanner.js',
+  '/voice.js',
   '/qr-decode.js',
   '/manifest.webmanifest',
   '/icons/icon.svg',

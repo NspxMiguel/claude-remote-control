@@ -42,6 +42,13 @@ const SHAPES = {
   ],
   dot: ['M12 13.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z'],
   plug: ['M9 3v6', 'M15 3v6', 'M7 9h10v3a5 5 0 01-10 0z', 'M12 17v4'],
+  folder: ['M4 6h7l2 2h7v10a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z'],
+  plus: ['M12 5v14', 'M5 12h14'],
+  chevron: ['M9 6l6 6-6 6'],
+  mic: ['M12 4a3 3 0 013 3v5a3 3 0 01-6 0V7a3 3 0 013-3z', 'M5 11a7 7 0 0014 0M12 18v3'],
+  // Two arcs and a cone: a speaker, for reading a reply out loud.
+  speaker: ['M4 10v4h3l4 3V7L7 10H4z', 'M15.5 9.5a3.5 3.5 0 010 5', 'M18 7a7 7 0 010 10'],
+  speakerOff: ['M4 10v4h3l4 3V7L7 10H4z', 'M16 10l4 4M20 10l-4 4'],
 };
 
 export function icon(name, options) {
