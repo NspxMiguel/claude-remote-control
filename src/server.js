@@ -82,7 +82,10 @@ export class RemoteControlServer {
     this.wss = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024 });
     this.server.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head));
 
-    this.sweeper = setInterval(() => this.auth.sweepPairingCodes(), 60_000);
+    this.sweeper = setInterval(() => {
+      this.auth.sweepPairingCodes();
+      this.sweepIdleMirrors();
+    }, 60_000);
     this.sweeper.unref?.();
   }
 
@@ -230,6 +233,24 @@ export class RemoteControlServer {
     this.heartbeat.unref?.();
   }
 
+  /**
+   * Each open mirror holds a file watcher and a feed in memory. Once nobody is
+   * watching one, let it go — otherwise browsing the session list all evening
+   * leaves a watcher behind for every transcript opened.
+   */
+  sweepIdleMirrors() {
+    const watched = new Set();
+    for (const state of this.clients.values()) {
+      for (const id of state.subscribed) watched.add(id);
+    }
+    for (const id of [...this.mirrors.open.keys()]) {
+      if (!watched.has(id)) {
+        this.mirrors.closeMirror(id);
+        log.debug(`mirror ${id} closed — no subscribers`);
+      }
+    }
+  }
+
   async feedFor(sessionId, since) {
     const session = this.sessions.get(sessionId);
     if (session) return { items: session.feed.snapshot(since), state: session.toJSON() };
@@ -306,6 +327,7 @@ export class RemoteControlServer {
       json(res, 200, {
         version: PKG.version,
         hostname: os.hostname(),
+        connectedClients: this.clients.size,
         identity: identity.kind,
         urls,
         tailscale,

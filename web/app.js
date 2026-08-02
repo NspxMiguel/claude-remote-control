@@ -266,6 +266,7 @@ function applyItems(sessionId, items) {
         continue;
       }
       replacement.dataset.ord = item.ord;
+      carryOverOpenState(existing, replacement);
       existing.replaceWith(replacement);
       view.nodes.set(item.id, replacement);
       continue;
@@ -281,6 +282,21 @@ function applyItems(sessionId, items) {
   $('#empty-state').hidden = view.nodes.size > 0;
   if (wasAtBottom || view.pinned) scrollToBottom();
   else $('#scroll-pin').hidden = false;
+}
+
+/**
+ * Items re-render whenever they change — a tool card is rebuilt when its result
+ * lands. Without this, a card you opened to watch would snap shut at the exact
+ * moment it got interesting.
+ */
+function carryOverOpenState(oldNode, newNode) {
+  const oldBody = oldNode.querySelector?.('.tool-body');
+  const newBody = newNode.querySelector?.('.tool-body');
+  if (oldBody && newBody) newBody.hidden = oldBody.hidden;
+
+  if (oldNode.tagName === 'DETAILS' && newNode.tagName === 'DETAILS') {
+    newNode.open = oldNode.open;
+  }
 }
 
 /** Keep the transcript chronological even when patches arrive out of order. */
@@ -315,7 +331,13 @@ function renderItem(item) {
     case 'text': {
       if (!item.text?.trim()) return null;
       const node = el('div', `item assistant${item.streaming ? ' streaming' : ''}`);
-      node.innerHTML = renderMarkdown(item.text);
+      if (item.streaming) {
+        // Mid-stream the markdown is half-written — an unclosed fence would
+        // flicker, and re-parsing on every token is wasted work on a phone.
+        node.textContent = item.text;
+      } else {
+        node.innerHTML = renderMarkdown(item.text);
+      }
       return withMeta(node, item);
     }
 
@@ -686,6 +708,11 @@ async function openSession(sessionId, isMirror) {
     }
   }
 
+  // Stop following the previous session so the daemon can release its mirror.
+  if (state.currentId && state.currentId !== sessionId) {
+    send({ t: 'unsubscribe', sessionId: state.currentId });
+  }
+
   state.currentId = sessionId;
   localStorage.setItem(LAST_SESSION_KEY, sessionId);
   state.views.delete(sessionId);
@@ -936,7 +963,14 @@ async function openSettings() {
       }
     }
 
-    body.appendChild(el('p', 'small muted', `Daemon v${data.version} on ${data.hostname}`));
+    const clients = data.connectedClients ?? 0;
+    body.appendChild(
+      el(
+        'p',
+        'small muted',
+        `Daemon v${data.version} on ${data.hostname} · ${clients} client${clients === 1 ? '' : 's'} connected`,
+      ),
+    );
   } catch (err) {
     body.appendChild(el('p', 'error', err.message));
   }
@@ -1275,6 +1309,8 @@ async function boot() {
     /* the socket will retry */
   }
 
+  if (await openRequestedSession()) return;
+
   const last = localStorage.getItem(LAST_SESSION_KEY);
   if (last && state.sessions.has(last)) {
     await openSession(last, false);
@@ -1283,8 +1319,32 @@ async function boot() {
   }
 }
 
+/**
+ * A #session=<id> link opens straight into a conversation — how you hand
+ * yourself a pointer to one from another device. Returns true if it handled one.
+ */
+async function openRequestedSession() {
+  const requested = new URLSearchParams(location.hash.slice(1)).get('session');
+  if (!requested) return false;
+
+  history.replaceState(null, '', location.pathname);
+  try {
+    await openSession(requested, !state.sessions.has(requested));
+    return true;
+  } catch (err) {
+    toast(err.message);
+    return false;
+  }
+}
+
 async function main() {
   wireUp();
+
+  // Changing only the fragment does not reload the page, so links that arrive
+  // while the app is already open have to be handled here too.
+  window.addEventListener('hashchange', () => {
+    if (state.token) openRequestedSession();
+  });
 
   // A pairing link drops the token in the fragment; consume it and clean the URL.
   const hash = new URLSearchParams(location.hash.slice(1));

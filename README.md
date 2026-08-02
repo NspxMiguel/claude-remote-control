@@ -10,6 +10,8 @@ A small daemon runs on your computer. A PWA runs in your pocket. Together they
 turn Claude Code into a chat app that can actually touch your files, run your
 commands, and ask your permission before it does.
 
+<img src="docs/screenshot-ios.png" width="300" alt="Claude Remote Control running in iOS Safari, showing a mirrored desktop session with code, a list and a blockquote">
+
 </div>
 
 ---
@@ -31,6 +33,8 @@ commands, and ask your permission before it does.
   exposure, no cloud middleman. It also works on plain LAN IPs at home.
 - **Installs like an app.** PWA on iOS, Android, macOS and Windows. Same UI
   scales up to a proper desktop panel with a session sidebar.
+- **Link straight to a conversation** with `#session=<id>`, so you can hand
+  yourself a pointer to one from another device.
 
 ## Requirements
 

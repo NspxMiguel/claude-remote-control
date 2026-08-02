@@ -263,6 +263,29 @@ describe('transcript mirroring', () => {
     assert.ok(after.items.some((i) => i.text === 'appended later'), 'new line reached the feed');
   });
 
+  test('mirrors nobody is watching are released', async () => {
+    await get(`/api/transcripts/${SESSION_ID}/mirror`, config.token, { method: 'POST' });
+    assert.ok(server.mirrors.get(SESSION_ID), 'the mirror is open');
+
+    // No websocket client is subscribed to it, so the sweep should collect it.
+    server.sweepIdleMirrors();
+    assert.equal(server.mirrors.get(SESSION_ID), null, 'the mirror was closed');
+
+    // A subscribed client keeps it alive.
+    const ws = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${encodeURIComponent(config.token)}`);
+    await new Promise((resolve) => ws.on('open', resolve));
+    ws.send(JSON.stringify({ t: 'subscribe', sessionId: SESSION_ID, since: 0 }));
+    await new Promise((resolve) => {
+      ws.on('message', (raw) => {
+        if (JSON.parse(raw.toString()).t === 'feed') resolve();
+      });
+    });
+
+    server.sweepIdleMirrors();
+    assert.ok(server.mirrors.get(SESSION_ID), 'a watched mirror survives the sweep');
+    ws.close();
+  });
+
   test('a bogus session id is a 404, and path tricks are refused', async () => {
     assert.equal((await get('/api/transcripts/ghost/mirror', config.token, { method: 'POST' })).status, 404);
     assert.equal(
