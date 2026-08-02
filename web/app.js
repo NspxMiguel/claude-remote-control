@@ -938,6 +938,23 @@ async function renderSetup() {
         });
         row.appendChild(run);
       } else if (task.manual) {
+        // It needs a password, so the closest thing to a button is putting the
+        // command in a Terminal window on the host, ready to run.
+        const open = el('button', 'ghost-btn wide', 'Open in Terminal on the Mac');
+        open.type = 'button';
+        open.addEventListener('click', async () => {
+          try {
+            await api('/api/setup/terminal', {
+              method: 'POST',
+              body: JSON.stringify({ command: task.manual }),
+            });
+            toast('Opened on the Mac — press return there');
+          } catch (err) {
+            toast(err.message);
+          }
+        });
+        row.appendChild(open);
+
         const command = el('div', 'setup-command');
         command.appendChild(el('code', null, task.manual));
         const copy = el('button', 'link-btn', 'Copy');

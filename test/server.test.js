@@ -133,6 +133,15 @@ describe('authentication', () => {
     assert.equal((await cleared.json()).cleared, true);
   });
 
+  test('the Terminal helper refuses a command this app did not suggest', async () => {
+    const res = await get('/api/setup/terminal', config.token, {
+      method: 'POST',
+      body: JSON.stringify({ command: 'rm -rf ~' }),
+    });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /Unknown setup command/);
+  });
+
   test('a junk key is refused with a reason', async () => {
     const res = await get('/api/agents/claude-code/credentials', config.token, {
       method: 'POST',

@@ -123,6 +123,27 @@ export async function checkTasks() {
   return entries;
 }
 
+/**
+ * Open Terminal with a command typed in, ready to run.
+ *
+ * Some steps need a password, which a daemon cannot supply and should not ask
+ * for. This is as close to a button as those can honestly get: the command is
+ * put in front of you on the host, and you press return. Nothing runs on its
+ * own — AppleScript's `do script` types it into a new window.
+ */
+export async function openInTerminal(command) {
+  if (process.platform !== 'darwin') {
+    throw Object.assign(new Error('Opening Terminal is macOS-only.'), { status: 400 });
+  }
+  // Escaping for AppleScript's own string literal, not for the shell.
+  const escaped = String(command).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const script = `tell application "Terminal"\nactivate\ndo script "${escaped}"\nend tell`;
+
+  await exec(`osascript -e ${JSON.stringify(script)}`, { env: shellEnv(), timeout: 15000 });
+  log.info('opened Terminal with a setup command');
+  return { opened: true, command };
+}
+
 export async function runTask(id) {
   const task = TASKS[id];
   if (!task) throw Object.assign(new Error(`Unknown setup task: ${id}`), { status: 404 });

@@ -42,69 +42,45 @@ final class DoctorModel: ObservableObject {
         isChecking = true
         defer { isChecking = false }
 
-        let outcome = await Task.detached { () -> Result<DoctorReport, Error> in
-            do {
-                let capture = try NodeRuntime.runCRC(["doctor", "--json"])
-                guard let data = capture.stdout.data(using: .utf8),
-                      let decoded = try? JSONDecoder().decode(DoctorReport.self, from: data)
-                else {
-                    let detail = capture.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    throw DoctorFailure.unreadable(detail.isEmpty ? "crc doctor printed nothing usable." : detail)
-                }
-                return .success(decoded)
-            } catch {
-                return .failure(error)
-            }
-        }.value
-
-        switch outcome {
-        case .success(let decoded):
-            report = decoded
-        case .failure(let error):
-            report = Self.substituteReport(for: error)
-        }
+        report = await Task.detached { Self.run() }.value
         lastCheckedAt = Date()
     }
 
-    private enum DoctorFailure: LocalizedError {
-        case unreadable(String)
-
-        var errorDescription: String? {
-            switch self {
-            case .unreadable(let detail): return detail
+    private nonisolated static func run() -> DoctorReport {
+        do {
+            let capture = try NodeRuntime.runCRC(["doctor", "--json"])
+            // `crc doctor` exits 1 when unhealthy, so the payload is what counts.
+            guard let data = capture.stdout.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(DoctorReport.self, from: data)
+            else {
+                let detail = capture.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                return failureReport(detail.isEmpty ? "crc doctor printed nothing usable." : detail)
             }
-        }
-    }
-
-    /// The doctor cannot report on a machine that cannot run it, so stand in
-    /// for it — the missing runtime is the only finding that matters anyway.
-    private static func substituteReport(for error: Error) -> DoctorReport {
-        if case NodeRuntime.RuntimeError.nodeMissing = error {
+            return decoded
+        } catch NodeRuntime.RuntimeError.nodeMissing {
+            // The doctor cannot report on a machine that cannot run it, and a
+            // missing runtime is the only finding that would matter anyway.
             return DoctorReport(healthy: false, checks: [
                 DoctorCheck(
                     level: .bad,
                     label: "Node.js",
                     detail: "not found on this Mac",
-                    fix: "Install it with `brew install node`, or from nodejs.org. Node 20 or newer."
+                    fix: "Install it with `brew install node`, or from nodejs.org — version 20 or newer."
                 ),
             ])
+        } catch {
+            return failureReport(error.localizedDescription)
         }
-        return DoctorReport(healthy: false, checks: [
+    }
+
+    private nonisolated static func failureReport(_ detail: String) -> DoctorReport {
+        DoctorReport(healthy: false, checks: [
             DoctorCheck(
                 level: .bad,
                 label: "Setup",
-                detail: error.localizedDescription,
+                detail: detail,
                 fix: "Reinstall the app: brew reinstall --cask claude-remote-control"
             ),
         ])
-    }
-}
-
-extension DoctorCheck {
-    init(level: Level, label: String, detail: String, fix: String?) {
-        self.level = level
-        self.label = label
-        self.detail = detail
-        self.fix = fix
     }
 }

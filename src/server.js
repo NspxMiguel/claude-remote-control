@@ -469,6 +469,21 @@ export class RemoteControlServer {
       return;
     }
 
+    if (route === 'setup/terminal' && method === 'POST') {
+      const body = await readJsonBody(req);
+      const { TASKS, openInTerminal } = await import('./setup.js');
+      // Only the commands this app itself suggests — never an arbitrary string
+      // from a client, which would make this an execution endpoint.
+      const known = Object.values(TASKS)
+        .map((task) => task.manual)
+        .filter(Boolean);
+      if (!known.includes(body.command)) {
+        throw Object.assign(new Error('Unknown setup command.'), { status: 400 });
+      }
+      json(res, 200, await openInTerminal(body.command));
+      return;
+    }
+
     const setupMatch = route.match(/^setup\/([^/]+)$/);
     if (setupMatch && method === 'POST') {
       const { runTask } = await import('./setup.js');
