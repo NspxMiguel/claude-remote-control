@@ -548,6 +548,24 @@ input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accen
   align-self: stretch;
   padding: 11px 13px;
 }
+.error-title { font-weight: 600; margin-bottom: 3px; }
+.error-text { color: var(--text); }
+.error-hint { color: var(--text-dim); margin-top: 5px; font-size: 12.5px; }
+
+/* Running out of plan or credit is not a failure of yours — it reads calmer. */
+.note.error.kind-quota,
+.note.error.kind-billing,
+.note.error.kind-rate,
+.note.error.kind-context {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+}
+.note.error.kind-auth {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
 .note.perm-note {
   border-radius: var(--radius-sm); align-self: stretch; text-align: left;
   display: flex; align-items: center; gap: 8px;

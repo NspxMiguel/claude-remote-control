@@ -263,8 +263,15 @@ export function renderItem(item) {
       return withMeta(el('div', 'item note', bits.join(' · ') || 'Done'), item);
     }
 
-    case 'error':
-      return withMeta(el('div', 'item note error', item.text), item);
+    case 'error': {
+      // A wall you hit mid-sentence deserves more than one red line: what
+      // happened, and what to do about it.
+      const box = el('div', `item note error kind-${item.errorKind || 'error'}`);
+      if (item.title) box.appendChild(el('div', 'error-title', item.title));
+      box.appendChild(el('div', 'error-text', item.text));
+      if (item.hint) box.appendChild(el('div', 'error-hint', item.hint));
+      return withMeta(box, item);
+    }
 
     case 'system':
       return withMeta(el('div', 'item note', item.text), item);

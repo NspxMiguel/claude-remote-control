@@ -77,28 +77,94 @@ function writeAttachments(cwd, attachments) {
  * act on. These messages are the whole error UI on a small screen, so they name
  * the fix in this app's own terms rather than the agent's.
  */
-function friendlyError(text) {
+/**
+ * Every one of these is a wall you can hit mid-sentence from a phone, where the
+ * raw message ("rate_limit_error", exit 1) tells you nothing about whether to
+ * wait five minutes, top up, or go find a laptop. `kind` lets the UI show the
+ * right shape of notice instead of one red box for everything.
+ */
+export function classifyError(text) {
   const message = text || '';
 
-  if (/not logged in|authentication_failed|invalid api key|oauth/i.test(message)) {
-    return (
-      'Claude Code is not logged in on this machine. On the host, run `claude` in a ' +
-      'terminal and sign in with /login (or set ANTHROPIC_API_KEY), then start a new session.'
-    );
+  // Checked before the general auth case: an expired credential and never
+  // having signed in both mention OAuth, and they need different answers.
+  if (/expired|refresh.*failed/i.test(message) && /token|oauth|credential|session/i.test(message)) {
+    return {
+      kind: 'auth',
+      title: 'Sign-in expired',
+      text: 'The stored credential is no longer valid.',
+      hint: 'Sign in again from Settings.',
+    };
+  }
+
+  if (/usage limit reached|limit will reset|resets? at/i.test(message)) {
+    // Claude's own message usually carries the reset time; keep it verbatim.
+    const when = message.match(/reset[s]?\s+at\s+([^.\n]+)/i);
+    return {
+      kind: 'quota',
+      title: 'Plan limit reached',
+      text: when
+        ? `You have used up this plan's allowance. It resets at ${when[1].trim()}.`
+        : 'You have used up this plan\'s allowance for now. It resets on a rolling window.',
+      hint: 'Switching to a smaller model, or an API key in Settings, keeps you going meanwhile.',
+    };
+  }
+  if (/rate.?limit|429|too many requests/i.test(message)) {
+    return {
+      kind: 'rate',
+      title: 'Rate limited',
+      text: 'The API is throttling requests right now.',
+      hint: 'Wait a moment and send it again — nothing was lost.',
+    };
+  }
+  if (/credit balance|insufficient|billing|payment|out of credit/i.test(message)) {
+    return {
+      kind: 'billing',
+      title: 'Out of credit',
+      text: 'The account has no credit left for API usage.',
+      hint: 'Top up at console.anthropic.com, or sign in with a subscription in Settings.',
+    };
+  }
+  if (/not logged in|authentication_failed|invalid api key|unauthorized|401|oauth/i.test(message)) {
+    return {
+      kind: 'auth',
+      title: 'Not signed in',
+      text: 'This agent has no working credentials on the host.',
+      hint: 'Settings has a Sign in button — it takes about twenty seconds.',
+    };
   }
   if (/binary not found|ENOENT|could not find claude|not found at/i.test(message)) {
-    return (
-      'Claude Code could not be found on this machine. Install it, or set ' +
-      '"claudeExecutable" to its full path in ~/.claude-remote-control/config.json.'
-    );
+    return {
+      kind: 'missing',
+      title: 'Agent not installed',
+      text: 'The agent could not be found on this machine.',
+      hint: 'Install it, or set its path in ~/.claude-remote-control/config.json.',
+    };
   }
-  if (/rate.?limit/i.test(message)) {
-    return 'Rate limited by the API. Wait a moment and try again.';
+  if (/overloaded|529|capacity/i.test(message)) {
+    return {
+      kind: 'rate',
+      title: 'Servers busy',
+      text: 'The model is overloaded at the moment.',
+      hint: 'Try again shortly, or switch model from the session menu.',
+    };
   }
-  if (/credit|billing|quota/i.test(message)) {
-    return 'The API rejected the request for billing reasons — check your Claude plan or credits.';
+  if (/context|too long|max.*tokens|token limit/i.test(message)) {
+    return {
+      kind: 'context',
+      title: 'Conversation too long',
+      text: 'This session has outgrown the model\'s context window.',
+      hint: 'Start a fresh session, or ask it to /compact first.',
+    };
   }
-  return message;
+  return { kind: 'error', title: null, text: message, hint: null };
+}
+
+/** The single line to show when only one line fits. */
+function friendlyError(text) {
+  const { title, text: body, hint } = classifyError(text);
+  if (!title) return body;
+  return hint ? `${title}. ${body} ${hint}` : `${title}. ${body}`;
 }
 
 /**
@@ -314,9 +380,15 @@ export class Session extends EventEmitter {
 
       case 'error': {
         this.feed.finishStreamingText();
-        const text = friendlyError(event.text);
-        this.lastError = text;
-        this.feed.append({ kind: 'error', text });
+        const classified = classifyError(event.text);
+        this.lastError = friendlyError(event.text);
+        this.feed.append({
+          kind: 'error',
+          text: classified.text,
+          title: classified.title,
+          hint: classified.hint,
+          errorKind: classified.kind,
+        });
         if (event.fatal) {
           this.setStatus('error');
           this.rejectAllPermissions('Session ended');
