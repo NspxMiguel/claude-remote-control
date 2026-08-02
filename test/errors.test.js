@@ -69,10 +69,23 @@ describe('credentials', () => {
     assert.equal(item.title, 'Sign-in expired');
   });
 
-  test('a missing binary names the config key', () => {
-    const item = classify('Claude Code native binary not found at /nope/claude');
-    assert.equal(item.errorKind, 'missing');
+  test('a missing binary names that agent’s own config key', () => {
+    const item = classifyError('Claude Code native binary not found at /nope/claude', {
+      label: 'Claude Code',
+      configKey: 'claudeExecutable',
+    });
+    assert.equal(item.kind, 'missing');
+    assert.match(item.title, /Claude Code is not installed/);
+    assert.match(item.hint, /"claudeExecutable"/);
     assert.match(item.hint, /claude-remote-control\/config\.json/);
+  });
+
+  test('another agent gets its own key named, not Claude’s', () => {
+    const item = classifyError('agy: command not found (ENOENT)', {
+      label: 'Google Antigravity',
+      configKey: 'antigravityExecutable',
+    });
+    assert.match(item.hint, /"antigravityExecutable"/);
   });
 });
 

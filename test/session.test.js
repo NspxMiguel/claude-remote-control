@@ -203,7 +203,7 @@ describe('failure reporting', () => {
     try {
       await waitFor(session, (s) => s.status === 'error', 'the failure to surface', 20000);
       assert.match(session.lastError, /could not be found/i);
-      assert.match(session.lastError, /claudeExecutable/, 'names the config key to set');
+      assert.match(session.lastError, /"claudeExecutable"/, 'names the config key to set');
       assert.ok(
         !/pathToClaudeCodeExecutable/.test(session.lastError),
         'does not leak SDK option names at the user',

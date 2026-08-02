@@ -73,18 +73,15 @@ function writeAttachments(cwd, attachments) {
 }
 
 /**
- * Turn an agent's terse failures into something a person holding a phone can
- * act on. These messages are the whole error UI on a small screen, so they name
- * the fix in this app's own terms rather than the agent's.
- */
-/**
  * Every one of these is a wall you can hit mid-sentence from a phone, where the
  * raw message ("rate_limit_error", exit 1) tells you nothing about whether to
  * wait five minutes, top up, or go find a laptop. `kind` lets the UI show the
  * right shape of notice instead of one red box for everything.
  */
-export function classifyError(text) {
+export function classifyError(text, agent = {}) {
   const message = text || '';
+  const label = agent.label || 'The agent';
+  const configKey = agent.configKey || 'the agent executable path';
 
   // Checked before the general auth case: an expired credential and never
   // having signed in both mention OAuth, and they need different answers.
@@ -136,9 +133,9 @@ export function classifyError(text) {
   if (/binary not found|ENOENT|could not find claude|not found at/i.test(message)) {
     return {
       kind: 'missing',
-      title: 'Agent not installed',
-      text: 'The agent could not be found on this machine.',
-      hint: 'Install it, or set its path in ~/.claude-remote-control/config.json.',
+      title: `${label} is not installed`,
+      text: `${label} could not be found on this machine.`,
+      hint: `Install it, or set "${configKey}" in ~/.claude-remote-control/config.json.`,
     };
   }
   if (/overloaded|529|capacity/i.test(message)) {
@@ -161,8 +158,8 @@ export function classifyError(text) {
 }
 
 /** The single line to show when only one line fits. */
-function friendlyError(text) {
-  const { title, text: body, hint } = classifyError(text);
+function friendlyError(text, agent) {
+  const { title, text: body, hint } = classifyError(text, agent);
   if (!title) return body;
   return hint ? `${title}. ${body} ${hint}` : `${title}. ${body}`;
 }
@@ -227,6 +224,19 @@ export class Session extends EventEmitter {
     });
   }
 
+  /**
+   * How this agent should be named in its own error messages, and which config
+   * key points at its executable — so "not installed" names the right one.
+   */
+  agentContext() {
+    const configKey = {
+      'claude-code': 'claudeExecutable',
+      acp: 'acpExecutable',
+      antigravity: 'antigravityExecutable',
+    }[this.driverId];
+    return { label: this.driverLabel, configKey };
+  }
+
   // Kept for callers and tests that predate multiple agents.
   get claudeSessionId() {
     return this.agentSessionId;
@@ -288,7 +298,7 @@ export class Session extends EventEmitter {
   }
 
   fail(text) {
-    const message = friendlyError(text);
+    const message = friendlyError(text, this.agentContext());
     log.error(`session ${this.id} failed:`, message);
     this.lastError = message;
     this.feed.append({ kind: 'error', text: message });
@@ -380,8 +390,8 @@ export class Session extends EventEmitter {
 
       case 'error': {
         this.feed.finishStreamingText();
-        const classified = classifyError(event.text);
-        this.lastError = friendlyError(event.text);
+        const classified = classifyError(event.text, this.agentContext());
+        this.lastError = friendlyError(event.text, this.agentContext());
         this.feed.append({
           kind: 'error',
           text: classified.text,
