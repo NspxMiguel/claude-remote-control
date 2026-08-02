@@ -87,6 +87,37 @@ describe('brute force protection', () => {
     for (let i = 0; i < 9; i++) auth.recordFailure('9.9.9.9');
     assert.equal(auth.isLockedOut('9.9.9.9'), false);
   });
+
+  test('a stale token cannot lock you out of pairing', () => {
+    // The case this exists for: a phone holding a revoked token reloads. Each
+    // load fires several API calls, all 401. Sharing one counter with the
+    // pairing route meant two reloads locked you out of fixing it.
+    const { auth } = freshAuth();
+    for (let i = 0; i < 30; i++) auth.recordFailure('10.0.0.5', 'auth');
+
+    assert.equal(auth.isLockedOut('10.0.0.5', 'pair'), false, 'pairing is still open');
+    assert.equal(auth.isLockedOut('10.0.0.5', 'auth'), false, 'and 30 is under the API limit');
+
+    for (let i = 0; i < 40; i++) auth.recordFailure('10.0.0.5', 'auth');
+    assert.equal(auth.isLockedOut('10.0.0.5', 'auth'), true, 'but it is not unlimited');
+    assert.equal(auth.isLockedOut('10.0.0.5', 'pair'), false, 'pairing stays open regardless');
+  });
+
+  test('guessing pairing codes is still throttled hard', () => {
+    const { auth } = freshAuth();
+    for (let i = 0; i < 10; i++) auth.recordFailure('7.7.7.7', 'pair');
+    assert.equal(auth.isLockedOut('7.7.7.7', 'pair'), true);
+  });
+
+  test('pairing successfully clears both counters', () => {
+    const { auth } = freshAuth();
+    for (let i = 0; i < 10; i++) auth.recordFailure('4.4.4.4', 'pair');
+    for (let i = 0; i < 60; i++) auth.recordFailure('4.4.4.4', 'auth');
+
+    auth.clearFailures('4.4.4.4');
+    assert.equal(auth.isLockedOut('4.4.4.4', 'pair'), false);
+    assert.equal(auth.isLockedOut('4.4.4.4', 'auth'), false);
+  });
 });
 
 describe('pairing codes', () => {

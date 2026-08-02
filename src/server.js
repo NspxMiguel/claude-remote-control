@@ -136,19 +136,19 @@ export class RemoteControlServer {
       return;
     }
     const ip = clientIp(req);
-    if (this.auth.isLockedOut(ip)) {
+    if (this.auth.isLockedOut(ip, 'auth')) {
       socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
       socket.destroy();
       return;
     }
     const identity = this.auth.verify(extractToken(req, url));
     if (!identity) {
-      this.auth.recordFailure(ip);
+      this.auth.recordFailure(ip, 'auth');
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
     }
-    this.auth.clearFailures(ip);
+    this.auth.clearFailures(ip, 'auth');
     this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws, identity));
   }
 
@@ -300,15 +300,15 @@ export class RemoteControlServer {
 
   requireAuth(req, url) {
     const ip = clientIp(req);
-    if (this.auth.isLockedOut(ip)) {
+    if (this.auth.isLockedOut(ip, 'auth')) {
       throw Object.assign(new Error('Too many failed attempts. Try again later.'), { status: 429 });
     }
     const identity = this.auth.verify(extractToken(req, url));
     if (!identity) {
-      this.auth.recordFailure(ip);
+      this.auth.recordFailure(ip, 'auth');
       throw Object.assign(new Error('Unauthorized'), { status: 401 });
     }
-    this.auth.clearFailures(ip);
+    this.auth.clearFailures(ip, 'auth');
     return identity;
   }
 

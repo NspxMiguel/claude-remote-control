@@ -2,7 +2,18 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { newToken, saveConfig } from './config.js';
 import { log } from './log.js';
 
-const MAX_FAILURES = 10;
+/**
+ * Two counters, because the two things being guessed are not comparable.
+ *
+ * A pairing code is six digits — a million tries, so ten strikes and you wait.
+ * A token is 43 characters of entropy, and the requests that carry a bad one
+ * are almost never an attack: they are a phone with a credential that was
+ * revoked, or a daemon whose config was regenerated. That phone fires several
+ * API calls per page load, so sharing one counter meant two reloads could lock
+ * someone out of *pairing* — the very thing they open the app to fix.
+ */
+const MAX_PAIR_FAILURES = 10;
+const MAX_AUTH_FAILURES = 60;
 const LOCKOUT_MS = 5 * 60 * 1000;
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 
@@ -17,34 +28,41 @@ function safeEqual(a, b) {
 export class Auth {
   constructor(config) {
     this.config = config;
-    /** ip -> { count, until } */
-    this.failures = new Map();
+    /** scope -> ip -> { count, until } */
+    this.failures = { pair: new Map(), auth: new Map() };
     /** code -> { expiresAt } */
     this.pairingCodes = new Map();
   }
 
-  isLockedOut(ip) {
-    const entry = this.failures.get(ip);
+  #limit(scope) {
+    return scope === 'pair' ? MAX_PAIR_FAILURES : MAX_AUTH_FAILURES;
+  }
+
+  isLockedOut(ip, scope = 'pair') {
+    const bucket = this.failures[scope] || this.failures.pair;
+    const entry = bucket.get(ip);
     if (!entry) return false;
     if (Date.now() > entry.until) {
-      this.failures.delete(ip);
+      bucket.delete(ip);
       return false;
     }
-    return entry.count >= MAX_FAILURES;
+    return entry.count >= this.#limit(scope);
   }
 
-  recordFailure(ip) {
-    const entry = this.failures.get(ip) || { count: 0, until: 0 };
+  recordFailure(ip, scope = 'pair') {
+    const bucket = this.failures[scope] || this.failures.pair;
+    const entry = bucket.get(ip) || { count: 0, until: 0 };
     entry.count += 1;
     entry.until = Date.now() + LOCKOUT_MS;
-    this.failures.set(ip, entry);
-    if (entry.count >= MAX_FAILURES) {
-      log.warn(`too many bad tokens from ${ip} — locked out for 5 minutes`);
+    bucket.set(ip, entry);
+    if (entry.count === this.#limit(scope)) {
+      log.warn(`too many bad ${scope === 'pair' ? 'pairing attempts' : 'tokens'} from ${ip} — locked out for 5 minutes`);
     }
   }
 
-  clearFailures(ip) {
-    this.failures.delete(ip);
+  clearFailures(ip, scope) {
+    if (scope) this.failures[scope]?.delete(ip);
+    else for (const bucket of Object.values(this.failures)) bucket.delete(ip);
   }
 
   /**
