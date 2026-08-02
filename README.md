@@ -51,7 +51,7 @@ over the network is a transcript and your yes-or-no on a permission prompt.
 | | |
 |---|---|
 | **Node.js 20+** | The daemon. No build step, three dependencies. |
-| **A signed-in agent** | Run `claude` in a terminal once and sign in with `/login`. The daemon launches Claude Code under your own account, so it needs credentials on the machine — being signed into the Claude Desktop app is **not** enough. Or paste a key into Settings ▸ Agents from the phone. |
+| **A signed-in agent** | Settings ▸ Agents ▸ **Sign in** runs the browser login from the phone. The daemon launches Claude Code under your own account, so it needs credentials on the machine — being signed into the Claude Desktop app is **not** enough. Pasting an API key works too. |
 | **Tailscale** | Optional. Without it you get LAN addresses, which are fine at home. With it, your phone reaches your machine from anywhere. |
 
 Not sure? Ask:
@@ -67,9 +67,18 @@ brew tap NspxMiguel/tap                     # adds my tap to Homebrew
 brew install --cask claude-remote-control   # builds the app on your machine
 ```
 
-A `>_` appears in the menu bar: start and stop the daemon, copy an address, show
-the pairing QR code, and fix whatever `crc doctor` is complaining about without
-opening a terminal — see [`mac/`](mac/).
+The cask downloads the source and compiles it where you install it, so nothing
+arrives quarantined and Gatekeeper has nothing to object to. It needs the Xcode
+Command Line Tools (free); if they are missing it starts that download and waits.
+A few minutes, most of it `npm install`.
+
+Open it afterwards and a `>_` appears in the menu bar: start and stop the daemon,
+copy an address, show the pairing QR code, and fix whatever `crc doctor` is
+complaining about without opening a terminal — see [`mac/`](mac/).
+
+First launch starts the daemon and adds a login item, so the thing you drive from
+your phone is running before you reach for your phone. Both are switches in the
+panel if you would rather they weren't.
 
 ## Quick start
 

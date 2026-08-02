@@ -1,6 +1,6 @@
 cask "claude-remote-control" do
   version "0.1.0"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000" # TODO: shasum -a 256 of the v#{version} tarball
+  sha256 "8c0eda59a7ea50a46b7a9e1d87e3839f5477972084d76a5ae25c4b621e52134f"
 
   # Downloads the SOURCE (not a prebuilt binary) and compiles it on the
   # installing machine. A local build means no quarantine attribute on the
@@ -24,7 +24,9 @@ cask "claude-remote-control" do
 
     clt_installed = system_command("/usr/bin/xcode-select", args: ["-p"], print_stderr: false).success?
 
-    unless clt_installed
+    if clt_installed
+      ohai "Command Line Tools found. Compiling the app…"
+    else
       ohai "Xcode Command Line Tools not found — downloading (needed to compile)…"
       system_command "/usr/bin/xcode-select", args: ["--install"]
 
@@ -33,14 +35,13 @@ cask "claude-remote-control" do
       timeout = 30 * 60 # 30 min
       until system_command("/usr/bin/xcode-select", args: ["-p"], print_stderr: false).success?
         if waited >= timeout
-          odie "Timed out waiting for the Command Line Tools. Run 'xcode-select --install', let it finish, then run 'brew reinstall --cask claude-remote-control'."
+          odie "Timed out waiting for the Command Line Tools. Run 'xcode-select --install', " \
+               "let it finish, then run 'brew reinstall --cask claude-remote-control'."
         end
         sleep 10
         waited += 10
       end
       ohai "Command Line Tools installed. Compiling the app…"
-    else
-      ohai "Command Line Tools found. Compiling the app…"
     end
 
     source_dir = Dir.glob("#{staged_path}/claude-remote-control-*").first || staged_path.to_s
@@ -55,10 +56,16 @@ cask "claude-remote-control" do
     # daemon's three runtime dependencies are installed into the bundle.
     ohai "Installing the daemon's dependencies…"
     npm_bin = "#{HOMEBREW_PREFIX}/bin/npm"
-    system_command npm_bin, args: ["install", "--omit=dev", "--no-audit", "--no-fund"], chdir: source_dir
+    # `npm` is a script that starts with `#!/usr/bin/env node`, and the PATH a
+    # cask hands its children does not include Homebrew's bin — so it has to be
+    # put back, or npm dies with "env: node: No such file or directory".
+    system_command npm_bin,
+                   args:  ["install", "--omit=dev", "--no-audit", "--no-fund"],
+                   chdir: source_dir,
+                   env:   { "PATH" => "#{HOMEBREW_PREFIX}/bin:/usr/bin:/bin:/usr/sbin:/sbin" }
 
     ohai "Assembling the app bundle…"
-    FileUtils.rm_rf(app_path)
+    FileUtils.rm_r(app_path) if File.exist?(app_path)
     FileUtils.mkdir_p("#{app_path}/Contents/MacOS")
     FileUtils.mkdir_p("#{app_path}/Contents/Resources/crc")
     FileUtils.cp("#{mac_dir}/.build/release/ClaudeRemoteControl", "#{app_path}/Contents/MacOS/ClaudeRemoteControl")
@@ -121,7 +128,7 @@ cask "claude-remote-control" do
   # the CLI, which may well still be in use.
   zap quit:  "com.miguel.clauderemotecontrol",
       trash: [
-        "~/Library/Preferences/com.miguel.clauderemotecontrol.plist",
         "#{appdir}/ClaudeRemoteControl.app",
+        "~/Library/Preferences/com.miguel.clauderemotecontrol.plist",
       ]
 end
