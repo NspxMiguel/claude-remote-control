@@ -726,6 +726,37 @@ input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accen
   letter-spacing: .04em;
 }
 
+.agent-row {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 8px;
+  background: var(--surface);
+}
+.agent-head { display: flex; align-items: center; gap: 8px; }
+.agent-name { font-weight: 600; font-size: 14px; flex: 1; }
+.agent-state { font-size: 12px; color: var(--text-faint); }
+.agent-row p { margin: 8px 0 0; line-height: 1.5; }
+.agent-key { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.agent-key input {
+  flex: 1; min-width: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-family: var(--mono);
+  font-size: 13px;
+  outline: none;
+}
+.agent-key input:focus { border-color: var(--accent-dim); }
+.link-btn {
+  flex: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 4px;
+}
+
 .device-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 10px 0; border-bottom: 1px solid var(--border-soft); font-size: 14px;

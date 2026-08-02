@@ -456,6 +456,28 @@ export class RemoteControlServer {
     }
 
     // --- device management (master token only) --------------------------------------
+    // --- agent credentials ----------------------------------------------------------
+    const credentialMatch = route.match(/^agents\/([^/]+)\/credentials$/);
+    if (credentialMatch) {
+      const { setCredential, clearCredential, describeCredential } = await import(
+        './agent/credentials.js'
+      );
+      const agentId = credentialMatch[1];
+
+      if (method === 'POST') {
+        const body = await readJsonBody(req);
+        const described = setCredential(this.config, agentId, body.apiKey);
+        log.info(`credentials set for ${agentId}`);
+        json(res, 200, { credential: described });
+        return;
+      }
+      if (method === 'DELETE') {
+        const cleared = clearCredential(this.config, agentId);
+        json(res, 200, { cleared, credential: describeCredential(this.config, agentId) });
+        return;
+      }
+    }
+
     if (route === 'pair/code' && method === 'POST') {
       json(res, 200, this.auth.createPairingCode());
       return;

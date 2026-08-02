@@ -1,11 +1,13 @@
 /**
  * Google Antigravity (`agy`) — headless driver.
  *
- * Honesty note: this has never been run against a real agent turn. The flag
- * surface below was checked against the binary's own `--help` (agy 1.1.9); the
- * shape of the stream-json events was taken from Google's published examples and
- * is unverified here. Every parser therefore treats an unfamiliar payload as
- * "ignore", never as "crash", and anything speculative says so where it sits.
+ * Verified against agy 1.1.9 on macOS: real turns run through this driver,
+ * including tool calls. The flag surface came from the binary's own `--help`,
+ * and the stream-json shapes were confirmed by capturing a live run — a
+ * `tool_info` carries `{name, parameters}` and, for a write, only the target
+ * path, which is why such a call reports no diffstat. Parsers still treat an
+ * unfamiliar payload as "ignore" rather than "crash", since the format is not
+ * a stable published contract.
  *
  * Two properties of this CLI shape the whole driver:
  *

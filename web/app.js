@@ -705,6 +705,85 @@ function toast(message) {
 }
 
 /**
+ * Sign an agent in from the phone. Every agent here normally authenticates in a
+ * terminal on the host, which is exactly what you do not have when you are away
+ * from it — so an API key can be pasted instead, and the login command is shown
+ * for when you do get back to a keyboard.
+ */
+function renderAgentSettings(agents) {
+  const container = $('#agents-body');
+  container.innerHTML = '';
+  if (!agents.length) return;
+
+  container.appendChild(el('label', null, 'Agents'));
+
+  for (const agent of agents) {
+    const row = el('div', 'agent-row');
+
+    const head = el('div', 'agent-head');
+    head.appendChild(el('i', `dot ${agent.available ? 'idle' : 'error'}`));
+    head.appendChild(el('span', 'agent-name', agent.label));
+    head.appendChild(el('span', 'agent-state', agent.available ? 'ready' : agent.detail || 'unavailable'));
+    row.appendChild(head);
+
+    const credential = agent.credential;
+    if (credential) {
+      if (credential.set) {
+        const stored = el('div', 'agent-key');
+        stored.appendChild(el('span', 'small muted', `${credential.label}: ${credential.hint}`));
+        const remove = el('button', 'link-btn', 'Remove');
+        remove.type = 'button';
+        remove.addEventListener('click', async () => {
+          try {
+            await api(`/api/agents/${agent.id}/credentials`, { method: 'DELETE' });
+            toast(`${agent.label} key removed`);
+            openSettings();
+          } catch (err) {
+            toast(err.message);
+          }
+        });
+        stored.appendChild(remove);
+        row.appendChild(stored);
+      } else {
+        row.appendChild(el('p', 'small muted', credential.loginHint));
+
+        const form = el('div', 'agent-key');
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.placeholder = credential.placeholder || 'API key';
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        form.appendChild(input);
+
+        const save = el('button', 'link-btn', 'Save');
+        save.type = 'button';
+        save.addEventListener('click', async () => {
+          if (!input.value.trim()) return;
+          try {
+            await api(`/api/agents/${agent.id}/credentials`, {
+              method: 'POST',
+              body: JSON.stringify({ apiKey: input.value.trim() }),
+            });
+            input.value = '';
+            toast(`${agent.label} key saved`);
+            state.serverState = await api('/api/state');
+            openSettings();
+          } catch (err) {
+            toast(err.message);
+          }
+        });
+        form.appendChild(save);
+        row.appendChild(form);
+      }
+    } else if (!agent.available && agent.fix) {
+      row.appendChild(el('p', 'small muted', agent.fix));
+    }
+
+    container.appendChild(row);
+  }
+}
+
+/**
  * Offer the agents that are actually installed. One that is missing still
  * appears, disabled, with the command that installs it — more useful than
  * pretending the app only ever supported one.
@@ -841,6 +920,8 @@ async function openSettings() {
         `Daemon v${data.version} on ${data.hostname} · ${clients} client${clients === 1 ? '' : 's'} connected`,
       ),
     );
+
+    renderAgentSettings(data.agents || []);
   } catch (err) {
     body.appendChild(el('p', 'error', err.message));
   }

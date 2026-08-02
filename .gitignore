@@ -6,3 +6,5 @@ npm-debug.log*
 config.local.json
 coverage/
 dist/
+.crc-attachments/
+.agy-demo/

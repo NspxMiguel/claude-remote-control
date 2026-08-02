@@ -18,6 +18,12 @@ const DEFAULTS = {
   host: '0.0.0.0',
   /** Master token. Anything holding this can drive Claude on this machine. */
   token: null,
+  /**
+   * Per-agent credentials, keyed by driver id: { 'claude-code': { apiKey } }.
+   * Stored in this file, which is mode 600 — the same protection the master
+   * token gets, and no more. Set from the app when an agent is not signed in.
+   */
+  credentials: {},
   /** Paired devices: { id, token, name, userAgent, createdAt, lastSeenAt }. */
   devices: [],
   /**
@@ -94,6 +100,10 @@ export function loadConfig() {
   }
   if (!Array.isArray(config.devices)) {
     config.devices = [];
+    dirty = true;
+  }
+  if (!config.credentials || typeof config.credentials !== 'object') {
+    config.credentials = {};
     dirty = true;
   }
   if (!Array.isArray(config.allowedRoots) || config.allowedRoots.length === 0) {

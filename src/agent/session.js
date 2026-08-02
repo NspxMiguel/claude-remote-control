@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Feed, summarizeTool } from '../protocol.js';
 import { getDriver, DEFAULT_DRIVER } from './drivers/index.js';
 import { log } from '../log.js';
@@ -32,6 +34,30 @@ function validateImages(images) {
       throw Object.assign(new Error('Image data is not valid base64.'), { status: 400 });
     }
     return { mediaType, data };
+  });
+}
+
+const IMAGE_EXTENSION = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+/**
+ * Put attachments where an agent without image support can still reach them:
+ * a hidden folder inside the working directory, so the paths are ones the agent
+ * is already allowed to read.
+ */
+function writeAttachments(cwd, attachments) {
+  const dir = path.join(cwd, '.crc-attachments');
+  fs.mkdirSync(dir, { recursive: true });
+
+  return attachments.map((image, index) => {
+    const name = `${Date.now().toString(36)}-${index + 1}.${IMAGE_EXTENSION[image.mediaType] || 'png'}`;
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, Buffer.from(image.data, 'base64'));
+    return file;
   });
 }
 
@@ -325,14 +351,22 @@ export class Session extends EventEmitter {
     if (this.status === 'ended' || this.driver.closed) {
       throw Object.assign(new Error('This session has ended — start a new one.'), { status: 409 });
     }
+    // An agent with no image support still gets the picture: it is written next
+    // to the project and named in the prompt, so the agent can open it with its
+    // own file tools. Refusing the attachment would be the worse answer.
+    let prompt = text;
+    let forDriver = attachments;
     if (attachments.length && !this.capabilities.images) {
-      throw Object.assign(new Error(`${this.driverLabel} cannot accept images.`), { status: 400 });
+      const paths = writeAttachments(this.cwd, attachments);
+      const list = paths.map((p) => `- ${p}`).join('\n');
+      prompt = `${text ? `${text}\n\n` : ''}Attached image${paths.length === 1 ? '' : 's'} saved to:\n${list}`;
+      forDriver = [];
     }
 
     // The feed keeps a note of attachments, not the bytes: it is replayed in
     // full on every reconnect, and megabytes of base64 would make that painful.
     this.feed.append({ kind: 'user', text, attachments: attachments.length || undefined });
-    this.driver.send(text, attachments);
+    this.driver.send(prompt, forDriver);
     this.setStatus('busy');
     return true;
   }

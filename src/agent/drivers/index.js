@@ -28,11 +28,13 @@ export async function detectDrivers(config = {}) {
       } catch (err) {
         status = { available: false, detail: err?.message || 'detection failed' };
       }
+      const { describeCredential } = await import('../credentials.js');
       return {
         id: driver.id,
         label: driver.label,
         capabilities: driver.capabilities,
         ...status,
+        credential: describeCredential(config, driver.id),
       };
     }),
   );

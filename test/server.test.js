@@ -113,6 +113,44 @@ describe('authentication', () => {
     assert.equal((await get('/api/pair/code', token, { method: 'POST' })).status, 200);
   });
 
+  test('an agent key can be set and cleared, and never comes back out', async () => {
+    const key = 'sk-ant-api03-000000000000000000000000FEED';
+
+    const saved = await get('/api/agents/claude-code/credentials', config.token, {
+      method: 'POST',
+      body: JSON.stringify({ apiKey: key }),
+    });
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json()).credential.set, true);
+
+    const state = await (await get('/api/state')).json();
+    const agent = state.agents.find((a) => a.id === 'claude-code');
+    assert.equal(agent.credential.set, true);
+    assert.equal(agent.credential.hint, 'sk-ant-a…FEED');
+    assert.ok(!JSON.stringify(state).includes(key), 'the key itself is never serialised');
+
+    const cleared = await get('/api/agents/claude-code/credentials', config.token, { method: 'DELETE' });
+    assert.equal((await cleared.json()).cleared, true);
+  });
+
+  test('a junk key is refused with a reason', async () => {
+    const res = await get('/api/agents/claude-code/credentials', config.token, {
+      method: 'POST',
+      body: JSON.stringify({ apiKey: 'nope' }),
+    });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /does not look like/);
+  });
+
+  test('credentials need a token like everything else', async () => {
+    const res = await fetch(`${base}/api/agents/claude-code/credentials`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ apiKey: 'sk-ant-api03-000000000000000000000000FEED' }),
+    });
+    assert.equal(res.status, 401);
+  });
+
   test('a device can revoke itself, which is how "sign out" works', async () => {
     const { token, device } = await (
       await fetch(`${base}/api/pair`, {

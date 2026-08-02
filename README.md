@@ -30,7 +30,8 @@ commands, and ask your permission before it does.
 | **Reads like the desktop app** | A run of tool calls collapses into one row — *Edited 3 files, ran grep -n  +24 −3* — that expands into the individual calls, each with its command, diff and output. The diffstat comes from the agent's own patch data, so it is exact. |
 | **Approval from the couch** | When the agent wants to run something, the request lands on your phone with a chime. Allow once, always allow, or deny. An unanswered prompt is denied after ten minutes rather than hanging forever. |
 | **Your desktop sessions, mirrored** | Conversations you started in Claude Desktop or the `claude` CLI show up read-only and update live, because both write the same JSONL transcripts. **Take over** forks one into a session you drive from the phone, leaving the original intact. |
-| **Photos and screenshots** | Attach from the camera or gallery, or paste one on desktop. Images are downscaled in the browser before upload, so a 12 MB photo crosses the network as a couple hundred KB. |
+| **Photos and screenshots** | Attach from the camera or gallery, or paste one on desktop. Images are downscaled in the browser before upload, so a 12 MB photo crosses the network as a couple hundred KB. An agent with no native image support gets the file written beside the project and named in the prompt, so attaching works everywhere. |
+| **Sign an agent in from the phone** | Settings lists every agent, whether it is ready, and the exact command that signs it in. If you cannot reach a terminal, paste an API key instead — it is stored mode-600 next to the master token and exported to that agent only. It never comes back out over the API. |
 | **More than one agent** | Claude Code is the one this is built around. Cursor works through ACP, including remote approval. Antigravity works through its headless stream. The UI adapts to what each one can actually do. |
 | **Nothing in the middle** | No cloud, no relay, no account. The daemon talks to your phone over your LAN or your tailnet, and the code that runs is the code in this repo. |
 
@@ -49,7 +50,7 @@ over the network is a transcript and your yes-or-no on a permission prompt.
 | | |
 |---|---|
 | **Node.js 20+** | The daemon. No build step, three dependencies. |
-| **A signed-in agent** | Run `claude` in a terminal once and sign in with `/login`. The daemon launches Claude Code under your own account, so it needs credentials on the machine — being signed into the Claude Desktop app is **not** enough. `ANTHROPIC_API_KEY` works too. |
+| **A signed-in agent** | Run `claude` in a terminal once and sign in with `/login`. The daemon launches Claude Code under your own account, so it needs credentials on the machine — being signed into the Claude Desktop app is **not** enough. Or paste a key into Settings ▸ Agents from the phone. |
 | **Tailscale** | Optional. Without it you get LAN addresses, which are fine at home. With it, your phone reaches your machine from anywhere. |
 
 Not sure? Ask:
@@ -153,6 +154,7 @@ like an SSH key.
 | | |
 |---|---|
 | **Every request needs a token** | The master token lives in `~/.claude-remote-control/config.json`, mode `600`. Phones get their own device tokens at pairing time. |
+| **Agent keys sit beside it** | A key you paste into Settings is stored in that same file and exported only to that agent's process. The API reports whether one is set and a masked hint (`sk-ant-a…FEED`), never the key. Prefer signing in on the host when you can — that keeps the credential in the agent's own keychain instead. |
 | **Devices are revocable, not sandboxed** | A paired device can run commands as you, so it can also read that config. Per-device tokens exist so you can revoke one without rotating everything — hygiene, not containment. Pair only devices you'd hand your unlocked laptop to. |
 | **Sessions are confined** | To `allowedRoots` — your home directory by default. Traversal out of them is refused, and so are symlinks pointing outside. |
 | **Brute force is throttled** | Ten bad tokens from one address locks it out for five minutes. |
@@ -213,6 +215,7 @@ network resumes with `?since=<seq>` instead of refetching the conversation.
   "maxFeedItems": 2000,
   "maxSessions": 8,               // each one is an agent process
   "disallowedTools": ["AskUserQuestion"],
+  "credentials": {},              // set from Settings ▸ Agents, never by hand
   "claudeExecutable": null,       // set if the binary lives somewhere unusual
   "acpExecutable": null,
   "antigravityExecutable": null

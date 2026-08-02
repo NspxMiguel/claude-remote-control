@@ -180,13 +180,25 @@ describe('acp driver', () => {
     }
   });
 
-  test('images are refused rather than silently dropped', async () => {
+  test('an image reaches an agent that has no image support, as a file', async () => {
     const session = await start();
+    session.on('permission', (p) => session.decidePermission(p.requestId, { decision: 'allow' }));
     const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-    assert.throws(
-      () => session.send('look', [{ mediaType: 'image/png', data: pixel }]),
-      /cannot accept images/,
-    );
+
+    assert.equal(session.send('look at this', [{ mediaType: 'image/png', data: pixel }]), true);
+    await waitFor(session, (s) => s.feed.items.some((i) => i.kind === 'result'), 'the turn to finish');
+
+    // The fixture echoes the prompt it received, so the path must be in it.
+    const echoed = session.feed.items.filter((i) => i.kind === 'text').map((i) => i.text).join(' ');
+    assert.match(echoed, /crc-attachments/, 'the agent was told where the image is');
+
+    const written = fs.readdirSync(path.join(WORK, '.crc-attachments'));
+    assert.equal(written.length, 1);
+    assert.ok(written[0].endsWith('.png'));
+
+    const bubble = session.feed.items.find((i) => i.kind === 'user');
+    assert.equal(bubble.attachments, 1, 'the phone still shows it as an attachment');
+    assert.equal(bubble.text, 'look at this', 'the bubble keeps what you typed, not the path list');
     await manager.close(session.id);
   });
 });

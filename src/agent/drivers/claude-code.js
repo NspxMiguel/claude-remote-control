@@ -6,6 +6,7 @@
  * shapes straight through as `raw_*` events rather than flattening them.
  */
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { credentialEnv, hasCredential } from '../credentials.js';
 import { log } from '../../log.js';
 
 export const id = 'claude-code';
@@ -44,17 +45,21 @@ const HOST_SESSION_ENV = [
   'CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL',
 ];
 
-function sanitizedEnv() {
+function sanitizedEnv(config) {
   const env = { ...process.env };
   const insideHarness = env.CLAUDECODE === '1' || Boolean(env.CLAUDE_CODE_HOST_SESSION_ID);
-  if (!insideHarness) return env;
 
-  for (const key of HOST_SESSION_ENV) delete env[key];
-  // The host proxy URL only works with the host's own credentials.
-  if (env.CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH || process.env.CLAUDE_CODE_HOST_SESSION_ID) {
-    delete env.ANTHROPIC_BASE_URL;
+  if (insideHarness) {
+    for (const key of HOST_SESSION_ENV) delete env[key];
+    // The host proxy URL only works with the host's own credentials.
+    if (env.CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH || process.env.CLAUDE_CODE_HOST_SESSION_ID) {
+      delete env.ANTHROPIC_BASE_URL;
+    }
   }
-  return env;
+
+  // A key set from the app wins: it was set precisely because the host login
+  // was not working.
+  return { ...env, ...credentialEnv(config, id) };
 }
 
 /**
@@ -107,6 +112,10 @@ class PushStream {
 }
 
 export async function detect(config = {}) {
+  // A key set from the app counts as being signed in — it is what the driver
+  // will export when it launches.
+  if (hasCredential(config, id)) return { available: true, detail: 'API key set in this app' };
+
   const { checkLogin } = await import('../../doctor.js');
   const credentials = await checkLogin();
   return {
@@ -140,7 +149,7 @@ export function createDriver({
     // Load the same CLAUDE.md, settings and MCP servers the desktop app uses,
     // so a remote session behaves like sitting at the machine.
     settingSources: ['user', 'project', 'local'],
-    env: sanitizedEnv(),
+    env: sanitizedEnv(config),
   };
   if (config?.claudeExecutable) options.pathToClaudeCodeExecutable = config.claudeExecutable;
   if (config?.disallowedTools?.length) options.disallowedTools = config.disallowedTools;
