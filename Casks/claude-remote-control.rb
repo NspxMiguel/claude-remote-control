@@ -63,7 +63,9 @@ cask "claude-remote-control" do
     FileUtils.mkdir_p("#{app_path}/Contents/Resources/crc")
     FileUtils.cp("#{mac_dir}/.build/release/ClaudeRemoteControl", "#{app_path}/Contents/MacOS/ClaudeRemoteControl")
     FileUtils.cp("#{mac_dir}/Resources/AppIcon.icns", "#{app_path}/Contents/Resources/AppIcon.icns")
-    ["bin", "src", "web", "node_modules", "package.json"].each do |item|
+    # `scripts` carries the two helpers the app shells out to: oauth-login.exp
+    # (signing an agent in from the phone) and allow-lid-control.sh.
+    ["bin", "src", "web", "scripts", "node_modules", "package.json"].each do |item|
       FileUtils.cp_r("#{source_dir}/#{item}", "#{app_path}/Contents/Resources/crc/#{item}")
     end
 

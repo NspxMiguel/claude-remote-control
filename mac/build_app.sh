@@ -24,7 +24,10 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources/crc"
 cp "${BUILD_DIR}/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 cp "Resources/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
 
-for item in bin src web node_modules package.json; do
+# `scripts` is not optional: the sign-in flow drives `claude setup-token`
+# through scripts/oauth-login.exp, and closed-lid mode is granted by
+# scripts/allow-lid-control.sh. Leaving it out breaks both, quietly.
+for item in bin src web scripts node_modules package.json; do
   cp -R "${DAEMON_DIR}/${item}" "${APP_BUNDLE}/Contents/Resources/crc/${item}"
 done
 

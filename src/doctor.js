@@ -62,8 +62,9 @@ export async function checkLogin() {
   return bad(
     'Credentials',
     'Claude Code is not signed in',
-    'Run `claude` in a terminal and sign in with /login. Being signed into the ' +
-      'Claude Desktop app is not enough — the daemon launches the CLI.',
+    'Open the app, go to Settings → Claude Code and press Sign in — it runs the ' +
+      'browser login for you. Being signed into the Claude Desktop app is not ' +
+      'enough on its own: the daemon launches the CLI, which keeps its own credentials.',
   );
 }
 

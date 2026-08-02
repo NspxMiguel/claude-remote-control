@@ -8,6 +8,7 @@ final class AppSettings: ObservableObject {
     private let defaults = UserDefaults.standard
     private let keepAwakeKey = "daemon.keepAwakeOnPower"
     private let startOnLaunchKey = "daemon.startOnLaunch"
+    private let firstRunKey = "app.hasRunBefore"
 
     /// Set while reconciling with the system, so writing a value back does not
     /// re-enter the side effect that produced it.
@@ -36,15 +37,28 @@ final class AppSettings: ObservableObject {
     /// in System Settings) and silence would look like a broken toggle.
     @Published private(set) var loginItemError: String?
 
+    /// True until the app has stored anything, i.e. the very first launch.
+    private var isFirstRun: Bool { defaults.object(forKey: firstRunKey) == nil }
+
     private init() {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         keepAwake = defaults.bool(forKey: keepAwakeKey)
-        startDaemonOnLaunch = defaults.bool(forKey: startOnLaunchKey)
+        // An app whose whole job is to be reachable from a phone is useless
+        // sitting idle in the menu bar, so out of the box it starts the daemon
+        // and comes back after a reboot. Both are switches in the panel.
+        startDaemonOnLaunch = defaults.object(forKey: startOnLaunchKey) == nil
+            ? true
+            : defaults.bool(forKey: startOnLaunchKey)
     }
 
     /// Applies the persisted state at launch. Separate from `init` because the
     /// side effects need the app to be running, not merely constructed.
     func applyAtLaunch() {
+        if isFirstRun {
+            defaults.set(true, forKey: firstRunKey)
+            defaults.set(startDaemonOnLaunch, forKey: startOnLaunchKey)
+            if !launchAtLogin { launchAtLogin = true }
+        }
         if keepAwake { CaffeinateService.shared.setEnabled(true) }
         if startDaemonOnLaunch { DaemonController.shared.start() }
     }
