@@ -136,15 +136,16 @@ through whatever interface they actually expose, which is not the same for each.
 | --- | --- | --- | --- | --- |
 | **Claude Code** | Agent SDK | token-level | yes | Full support. Models, interrupt, images, resume. |
 | **Cursor** | `agent acp` (Agent Client Protocol) | chunked | yes | ACP is the only Cursor interface that can ask a human; its print mode streams one-way with no channel to answer on. |
-| **Antigravity** | `agy -p --output-format stream-json` | chunked | **no** | The headless stream is one-way. Tools run without asking, so treat an Antigravity session as `--dangerously-skip-permissions`. |
+| **Antigravity** | `agy -p --output-format stream-json` | chunked | **no** | Its headless stream is one-way, and it asks for approval *on the host* — with nobody at that terminal every tool is denied. Verified against agy 1.1.9: pick **Bypass all** for a remote Antigravity session, or it will read nothing and write nothing. |
 
 The UI only offers agents that are installed, and says up front what a given one
 cannot do rather than showing buttons that quietly fail.
 
-> Cursor and Antigravity are written against their published protocols and
-> covered by tests that speak those protocols, but neither has been run against
-> the real binary — neither is installed on the machine this was built on. If
-> you hit a mismatch, that is where to look first.
+> Antigravity has been run end to end against the real binary (agy 1.1.9),
+> including tool calls and an image sent from a phone. Cursor is written against
+> the published ACP schema and covered by a fixture that speaks that protocol,
+> but has not been run against the real `agent` binary — if you hit a mismatch,
+> that is where to look first.
 
 ## Security
 

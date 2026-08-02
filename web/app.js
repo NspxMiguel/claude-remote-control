@@ -827,9 +827,18 @@ function renderAgentNote() {
     note.textContent = agent.fix || 'Not installed on this machine.';
     return;
   }
+  // An agent that cannot route approvals here still asks — on the host, where
+  // nobody is listening, so every tool gets denied. Saying "cannot ask" would
+  // be true and useless; this is the sentence that saves a wasted session.
+  if (!agent.capabilities?.permissions) {
+    note.textContent =
+      `${agent.label} asks for tool approval on the host machine. With nobody there to answer, ` +
+      'every tool is denied — choose “Bypass all” below for it to get anything done.';
+    return;
+  }
+
   const missing = [];
-  if (!agent.capabilities?.permissions) missing.push('cannot ask before running tools');
-  if (!agent.capabilities?.images) missing.push('no image attachments');
+  if (!agent.capabilities?.images) missing.push('images are passed as files, not inline');
   if (!agent.capabilities?.models) missing.push('no model switching');
   note.textContent = missing.length ? `Note: ${missing.join(', ')}.` : '';
 }
