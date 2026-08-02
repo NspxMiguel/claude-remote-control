@@ -46,6 +46,8 @@ const DEFAULTS = {
   claudeExecutable: null,
   /** Keep this many feed items in memory per session. */
   maxFeedItems: 2000,
+  /** Cap on concurrent live sessions — each one is a Claude Code process. */
+  maxSessions: 8,
 };
 
 function ensureDir() {

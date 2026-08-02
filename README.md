@@ -22,6 +22,8 @@ commands, and ask your permission before it does.
   the diff it wrote, the output it got — instead of a wall of text.
 - **Approve permissions remotely.** When Claude wants to run something, your
   phone buzzes. Allow once, always allow, or deny — from the couch.
+- **Send photos and screenshots.** Attach from the camera or gallery (or paste
+  one on desktop); images are resized in the browser before they're sent.
 - **See your desktop sessions.** Conversations started in Claude Desktop or the
   `claude` CLI show up read-only and update live. Tap **Take over** to continue
   one from your phone.
@@ -76,6 +78,21 @@ npx crc start
 | `crc status` | Addresses, Tailscale state, paired devices |
 | `crc token --rotate` | New master token; revokes every paired device |
 | `crc devices --revoke <id>` | Kick one lost phone |
+
+### On a desktop
+
+The same page is the desktop app — install it from the browser's address bar,
+or just keep a tab open. Sessions live in a sidebar, code blocks have copy
+buttons, and the tab title tells you when Claude needs you.
+
+| Shortcut | Action |
+| --- | --- |
+| `⌘/Ctrl + K` | New session |
+| `⌘/Ctrl + .` | Interrupt |
+| `⌘/Ctrl + Enter` | Allow a pending permission |
+| `⌘/Ctrl + Backspace` | Deny it |
+| `Esc` | Close the open sheet |
+| `Enter` | Send (a phone keyboard inserts a newline instead) |
 
 ## Reaching it from anywhere
 
@@ -136,7 +153,9 @@ npx crc token --rotate
   "defaultModel": "sonnet",
   "defaultPermissionMode": "default",
   "permissionTimeoutSec": 600, // unanswered prompts are denied after this
-  "maxFeedItems": 2000
+  "maxFeedItems": 2000,
+  "maxSessions": 8,            // each one is a Claude Code process
+  "claudeExecutable": null     // set if `claude` lives somewhere unusual
 }
 ```
 

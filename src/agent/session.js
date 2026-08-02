@@ -39,6 +39,37 @@ function sanitizedEnv() {
   return env;
 }
 
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const MAX_IMAGES = 4;
+/** Base64 of roughly 3.7 MB of image data — comfortably above a resized photo. */
+const MAX_IMAGE_CHARS = 5 * 1024 * 1024;
+
+/** Reject anything that is not a plausible, in-budget image before it reaches Claude. */
+function validateImages(images) {
+  if (!Array.isArray(images) || images.length === 0) return [];
+  if (images.length > MAX_IMAGES) {
+    throw Object.assign(new Error(`At most ${MAX_IMAGES} images per message.`), { status: 400 });
+  }
+
+  return images.map((image) => {
+    const mediaType = image?.mediaType;
+    const data = image?.data;
+    if (!ALLOWED_IMAGE_TYPES.has(mediaType)) {
+      throw Object.assign(new Error(`Unsupported image type: ${mediaType}`), { status: 400 });
+    }
+    if (typeof data !== 'string' || !data.length) {
+      throw Object.assign(new Error('Image data is missing.'), { status: 400 });
+    }
+    if (data.length > MAX_IMAGE_CHARS) {
+      throw Object.assign(new Error('Image is too large — resize it first.'), { status: 413 });
+    }
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
+      throw Object.assign(new Error('Image data is not valid base64.'), { status: 400 });
+    }
+    return { mediaType, data };
+  });
+}
+
 /** Turn the SDK's terse auth failures into something actionable on a phone. */
 function friendlyError(text) {
   if (/not logged in|authentication_failed|invalid api key|oauth/i.test(text || '')) {
@@ -301,17 +332,32 @@ export class Session extends EventEmitter {
 
   // ---- input ----------------------------------------------------------------------
 
-  send(text) {
-    if (!text?.trim()) return false;
+  /**
+   * @param {string} text
+   * @param {{mediaType: string, data: string}[]} [images] base64 image payloads
+   */
+  send(text, images = []) {
+    const attachments = validateImages(images);
+    if (!text?.trim() && !attachments.length) return false;
     if (this.status === 'ended' || this.input.closed) {
       throw Object.assign(new Error('This session has ended — start a new one.'), { status: 409 });
     }
-    this.feed.append({ kind: 'user', text });
-    this.input.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-    });
+
+    // The feed keeps a note of attachments, not the bytes: it is replayed in
+    // full on every reconnect, and megabytes of base64 would make that painful.
+    this.feed.append({ kind: 'user', text, attachments: attachments.length || undefined });
+
+    const content = attachments.length
+      ? [
+          ...attachments.map((image) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: image.mediaType, data: image.data },
+          })),
+          ...(text?.trim() ? [{ type: 'text', text }] : []),
+        ]
+      : text;
+
+    this.input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
     this.setStatus('busy');
     return true;
   }

@@ -171,6 +171,84 @@ describe('session lifecycle', () => {
   });
 });
 
+describe('image attachments', () => {
+  // A 1x1 PNG, base64.
+  const PIXEL =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  test('accepts a valid image and records it on the feed without the bytes', async () => {
+    const session = manager.create({ cwd: WORK });
+    await waitFor(session, (s) => s.claudeSessionId, 'init');
+    session.on('permission', (p) => session.decidePermission(p.requestId, { decision: 'allow' }));
+
+    assert.equal(session.send('what is this?', [{ mediaType: 'image/png', data: PIXEL }]), true);
+
+    const userItem = session.feed.items.find((i) => i.kind === 'user');
+    assert.equal(userItem.attachments, 1);
+    assert.equal(userItem.text, 'what is this?');
+    assert.ok(!JSON.stringify(userItem).includes(PIXEL), 'base64 is not replayed in the feed');
+    await manager.close(session.id);
+  });
+
+  test('the image block actually reaches the Claude process, correctly shaped', async () => {
+    const session = manager.create({ cwd: WORK });
+    await waitFor(session, (s) => s.claudeSessionId, 'init');
+    session.on('permission', (p) => session.decidePermission(p.requestId, { decision: 'allow' }));
+
+    session.send('describe this', [
+      { mediaType: 'image/png', data: PIXEL },
+      { mediaType: 'image/jpeg', data: PIXEL },
+    ]);
+    await waitFor(session, (s) => s.feed.items.some((i) => i.kind === 'result'), 'result');
+
+    // The fixture rejects malformed image blocks outright, so reaching a normal
+    // result already proves the shape; the echo confirms the count.
+    const texts = session.feed.items.filter((i) => i.kind === 'text').map((i) => i.text);
+    assert.ok(
+      texts.some((t) => t.includes('[+2 image]')),
+      `expected the process to report 2 images, got: ${texts.join(' | ')}`,
+    );
+    assert.ok(!session.feed.items.some((i) => i.kind === 'error'), 'no malformed-image error');
+    await manager.close(session.id);
+  });
+
+  test('an image with no text is still a message', async () => {
+    const session = manager.create({ cwd: WORK });
+    await waitFor(session, (s) => s.claudeSessionId, 'init');
+    assert.equal(session.send('', [{ mediaType: 'image/png', data: PIXEL }]), true);
+    await manager.close(session.id);
+  });
+
+  test('rejects unsupported types, bad base64, oversize and too many', async () => {
+    const session = manager.create({ cwd: WORK });
+    await waitFor(session, (s) => s.claudeSessionId, 'init');
+
+    assert.throws(
+      () => session.send('x', [{ mediaType: 'image/svg+xml', data: PIXEL }]),
+      /Unsupported image type/,
+    );
+    assert.throws(() => session.send('x', [{ mediaType: 'image/png', data: 'not base64!' }]), /valid base64/);
+    assert.throws(() => session.send('x', [{ mediaType: 'image/png' }]), /data is missing/);
+    assert.throws(
+      () => session.send('x', [{ mediaType: 'image/png', data: 'A'.repeat(6 * 1024 * 1024) }]),
+      /too large/,
+    );
+    assert.throws(
+      () => session.send('x', Array.from({ length: 5 }, () => ({ mediaType: 'image/png', data: PIXEL }))),
+      /At most 4 images/,
+    );
+    await manager.close(session.id);
+  });
+
+  test('an empty message with no images is still ignored', async () => {
+    const session = manager.create({ cwd: WORK });
+    await waitFor(session, (s) => s.claudeSessionId, 'init');
+    assert.equal(session.send('', []), false);
+    assert.equal(session.send('   ', undefined), false);
+    await manager.close(session.id);
+  });
+});
+
 describe('session control', () => {
   test('interrupt returns the session to idle', async () => {
     const session = manager.create({ cwd: WORK });
@@ -216,6 +294,28 @@ describe('manager', () => {
     await manager.close(b.id);
   });
 
+  test('refuses to start more sessions than the cap allows', async () => {
+    const previous = config.maxSessions;
+    config.maxSessions = 2;
+    const made = [];
+    try {
+      made.push(manager.create({ cwd: WORK }), manager.create({ cwd: WORK }));
+      assert.throws(() => manager.create({ cwd: WORK }), /Already running 2 sessions/);
+
+      // Let both finish starting, so no late init patches leak into later tests.
+      for (const session of made) await waitFor(session, (s) => s.claudeSessionId, 'init');
+
+      // Ending one frees a slot.
+      await manager.close(made.pop().id);
+      const replacement = manager.create({ cwd: WORK });
+      await waitFor(replacement, (s) => s.claudeSessionId, 'replacement init');
+      made.push(replacement);
+    } finally {
+      for (const session of made) await manager.close(session.id);
+      config.maxSessions = previous;
+    }
+  });
+
   test('patches and state changes reach subscribers', async () => {
     const patches = [];
     const states = [];
@@ -228,8 +328,9 @@ describe('manager', () => {
     session.send('emit-check');
     await waitFor(session, (s) => s.feed.items.some((i) => i.kind === 'result'), 'result');
 
-    assert.ok(patches.length > 5, 'patches were emitted for the turn');
-    assert.ok(patches.every((p) => p.sessionId === session.id));
+    // The manager is shared across tests, so count only this session's patches.
+    assert.ok(patches.filter((p) => p.sessionId === session.id).length > 5, 'patches were emitted');
+    assert.ok(patches.every((p) => typeof p.sessionId === 'string'), 'every patch is attributed');
     assert.ok(states.includes('busy') && states.includes('idle'));
     await manager.close(session.id);
   });

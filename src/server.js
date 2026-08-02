@@ -78,7 +78,8 @@ export class RemoteControlServer {
     this.mirrors.on('state', (state) => this.broadcast({ t: 'session', session: state }));
 
     this.server = http.createServer((req, res) => this.handle(req, res));
-    this.wss = new WebSocketServer({ noServer: true });
+    // Big enough for a few base64 photos, small enough to bound memory.
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024 });
     this.server.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head));
 
     this.sweeper = setInterval(() => this.auth.sweepPairingCodes(), 60_000);
@@ -176,7 +177,7 @@ export class RemoteControlServer {
       case 'prompt': {
         const session = this.sessions.get(msg.sessionId);
         if (!session) throw new Error('Session not found (or it is a read-only mirror)');
-        session.send(msg.text);
+        session.send(msg.text, msg.images);
         break;
       }
       case 'interrupt': {
@@ -363,8 +364,9 @@ export class RemoteControlServer {
       if (!session) throw Object.assign(new Error('Session not found'), { status: 404 });
 
       if (action === 'message' && method === 'POST') {
-        const body = await readJsonBody(req);
-        const ok = session.send(body.text);
+        // Images arrive as base64, so allow a bigger body than the default.
+        const body = await readJsonBody(req, 24 * 1024 * 1024);
+        const ok = session.send(body.text, body.images);
         json(res, ok ? 202 : 400, { accepted: ok });
         return;
       }

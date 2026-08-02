@@ -24,7 +24,13 @@ const state = {
   views: new Map(),
   permQueue: [],
   serverState: null,
+  /** Images staged for the next message: { mediaType, data, url, name }. */
+  pending: [],
 };
+
+/** Anthropic recommends no side longer than this; bigger just wastes bandwidth. */
+const MAX_IMAGE_EDGE = 1568;
+const MAX_ATTACHMENTS = 4;
 
 // ---------------------------------------------------------------------------
 // API
@@ -294,7 +300,16 @@ function insertByOrder(container, node, ord) {
 function renderItem(item) {
   switch (item.kind) {
     case 'user': {
-      return withMeta(el('div', 'item bubble-user', item.text), item);
+      const bubble = el('div', 'item bubble-user', item.text || '');
+      if (item.attachments) {
+        const chip = el(
+          'div',
+          'bubble-attach',
+          `🖼 ${item.attachments} image${item.attachments === 1 ? '' : 's'}`,
+        );
+        bubble.prepend(chip);
+      }
+      return withMeta(bubble, item);
     }
 
     case 'text': {
@@ -353,7 +368,62 @@ function renderItem(item) {
 
 function withMeta(node, item) {
   node.dataset.itemId = item.id;
+  decorateCodeBlocks(node);
   return node;
+}
+
+/**
+ * Give every code block a copy button. Reading a command off a phone screen and
+ * retyping it is exactly the friction this app exists to remove.
+ */
+function decorateCodeBlocks(root) {
+  for (const pre of root.querySelectorAll?.('pre.code-block') ?? []) {
+    if (pre.parentElement?.classList.contains('code-wrap')) continue;
+    const wrap = el('div', 'code-wrap');
+    pre.replaceWith(wrap);
+    wrap.appendChild(pre);
+
+    const button = el('button', 'code-copy', 'Copy');
+    button.type = 'button';
+    button.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const ok = await copyText(pre.textContent);
+      button.textContent = ok ? 'Copied' : 'Failed';
+      setTimeout(() => {
+        button.textContent = 'Copy';
+      }, 1600);
+    });
+    wrap.appendChild(button);
+  }
+}
+
+/**
+ * navigator.clipboard is unavailable over plain HTTP, which is exactly how this
+ * app is served on a LAN or tailnet — so fall back to the legacy path.
+ */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to the legacy path */
+  }
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(area);
+    area.select();
+    area.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 function renderTool(item) {
@@ -419,6 +489,97 @@ function renderToolBody(body, item) {
     body.appendChild(el('p', 'label', item.status === 'error' ? 'Error' : 'Output'));
     body.appendChild(el('pre', 'code-block', item.result));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Image attachments
+// ---------------------------------------------------------------------------
+
+/**
+ * Shrink a photo in the browser before it ever crosses the network. A modern
+ * phone camera produces 4-12 MB files; downscaling to Anthropic's recommended
+ * edge length gets that to a couple hundred KB with no loss of usable detail.
+ */
+function shrinkImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(img.width, img.height));
+      const width = Math.max(1, Math.round(img.width * scale));
+      const height = Math.max(1, Math.round(img.height * scale));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // PNG keeps screenshots of text crisp; photos are far smaller as JPEG.
+      const asPng = file.type === 'image/png' && width * height <= 1200 * 1200;
+      const mediaType = asPng ? 'image/png' : 'image/jpeg';
+      const dataUrl = canvas.toDataURL(mediaType, 0.82);
+      resolve({
+        mediaType,
+        data: dataUrl.slice(dataUrl.indexOf(',') + 1),
+        url: dataUrl,
+        name: file.name || 'image',
+      });
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`Could not read ${file.name || 'that image'}`));
+    };
+    img.src = url;
+  });
+}
+
+async function addAttachments(files) {
+  const room = MAX_ATTACHMENTS - state.pending.length;
+  if (room <= 0) {
+    toast(`Up to ${MAX_ATTACHMENTS} images per message`);
+    return;
+  }
+
+  for (const file of [...files].slice(0, room)) {
+    if (!file.type.startsWith('image/')) {
+      toast('Only images can be attached');
+      continue;
+    }
+    try {
+      state.pending.push(await shrinkImage(file));
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+  renderAttachments();
+}
+
+function renderAttachments() {
+  const bar = $('#attachments');
+  bar.innerHTML = '';
+  bar.hidden = state.pending.length === 0;
+
+  state.pending.forEach((image, index) => {
+    const chip = el('div', 'attachment');
+    const thumb = document.createElement('img');
+    thumb.src = image.url;
+    thumb.alt = image.name;
+    chip.appendChild(thumb);
+
+    const remove = el('button', 'attachment-remove', '✕');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `Remove ${image.name}`);
+    remove.addEventListener('click', () => {
+      state.pending.splice(index, 1);
+      renderAttachments();
+    });
+    chip.appendChild(remove);
+    bar.appendChild(chip);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -871,20 +1032,39 @@ function wireUp() {
     }
   });
 
+  $('#attach').addEventListener('click', () => $('#file-input').click());
+  $('#file-input').addEventListener('change', async (event) => {
+    await addAttachments(event.target.files);
+    event.target.value = '';
+  });
+
+  // Pasting a screenshot straight into the composer is the desktop path.
+  input.addEventListener('paste', (event) => {
+    const files = [...(event.clipboardData?.files || [])];
+    if (files.length) {
+      event.preventDefault();
+      addAttachments(files);
+    }
+  });
+
   $('#composer').addEventListener('submit', (event) => {
     event.preventDefault();
     const text = input.value.trim();
-    if (!text || !state.currentId) return;
+    if ((!text && !state.pending.length) || !state.currentId) return;
     const session = currentSession();
     if (session?.readOnly) {
       toast('This is a read-only mirror. Use “Take over” to continue it.');
       return;
     }
-    if (!send({ t: 'prompt', sessionId: state.currentId, text })) {
+
+    const images = state.pending.map(({ mediaType, data }) => ({ mediaType, data }));
+    if (!send({ t: 'prompt', sessionId: state.currentId, text, images })) {
       toast('Not connected — reconnecting…');
       return;
     }
     input.value = '';
+    state.pending = [];
+    renderAttachments();
     autoGrow();
     scrollToBottom();
   });

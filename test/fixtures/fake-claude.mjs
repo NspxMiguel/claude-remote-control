@@ -39,8 +39,10 @@ function askPermission(toolName, input, toolUseId) {
   });
 }
 
-async function runTurn(promptText) {
+async function runTurn(promptText, imageCount = 0) {
   turn += 1;
+  // Echoed back so tests can assert images survived the trip to the process.
+  if (imageCount) promptText = `${promptText} [+${imageCount} image]`;
   const messageId = `msg_${turn}`;
   const toolUseId = `toolu_${turn}`;
 
@@ -202,8 +204,20 @@ rl.on('line', async (line) => {
 
   if (msg.type === 'user') {
     const content = msg.message?.content;
-    const text = typeof content === 'string' ? content : (content?.[0]?.text ?? '');
-    await runTurn(text);
+    if (typeof content === 'string') {
+      await runTurn(content);
+    } else if (Array.isArray(content)) {
+      const text = content.find((b) => b?.type === 'text')?.text ?? '';
+      const images = content.filter((b) => b?.type === 'image');
+      // Verify the image blocks are shaped the way the API expects.
+      for (const image of images) {
+        if (image.source?.type !== 'base64' || !image.source?.media_type || !image.source?.data) {
+          emit({ type: 'result', subtype: 'error', session_id: SESSION_ID, duration_ms: 1, error: 'malformed image block' });
+          return;
+        }
+      }
+      await runTurn(text, images.length);
+    }
   }
 });
 

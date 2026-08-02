@@ -20,6 +20,14 @@ export class SessionManager extends EventEmitter {
   }
 
   create({ cwd, model, permissionMode, resumeFrom, forkSession, title } = {}) {
+    const limit = this.config.maxSessions ?? 8;
+    if (this.sessions.size >= limit) {
+      throw Object.assign(
+        new Error(`Already running ${limit} sessions. End one before starting another.`),
+        { status: 429 },
+      );
+    }
+
     const dir = realPath(cwd || this.config.defaultCwd);
     if (!isPathAllowed(this.config, dir)) {
       throw Object.assign(new Error(`Directory is outside the allowed roots: ${dir}`), { status: 403 });
