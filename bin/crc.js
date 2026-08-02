@@ -11,6 +11,7 @@ const HELP = `
 ${bold('claude-remote-control')} — drive Claude Code from your phone
 
   ${cyan('crc start')}              Start the daemon (default command)
+  ${cyan('crc doctor')}             Check everything the daemon needs
   ${cyan('crc pair')}               Print a pairing QR code for a new device
   ${cyan('crc status')}             Show config, addresses and Tailscale state
   ${cyan('crc token')} [--rotate]   Show or rotate the master token
@@ -106,6 +107,16 @@ async function cmdStart(args) {
   log.info(`${bold('claude-remote-control')} listening on ${config.host}:${config.port}`);
   await printAccessInfo(config);
 
+  // The daemon starts fine without credentials, but every session would fail —
+  // better to say so now than from a phone in another room.
+  const { checkLogin } = await import('../src/doctor.js');
+  const credentials = await checkLogin();
+  if (credentials.level === 'bad') {
+    console.log(`  ${red('Claude Code is not signed in on this machine.')}`);
+    console.log(`  ${dim(credentials.fix)}`);
+    console.log(`  ${dim('Run `crc doctor` to re-check.')}\n`);
+  }
+
   if (config.host === '0.0.0.0') {
     console.log(
       dim('  Anyone on your LAN or tailnet who has the token can run commands as you.\n' +
@@ -121,6 +132,29 @@ async function cmdStart(args) {
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+async function cmdDoctor(args) {
+  const config = loadConfig();
+  if (args.flags.port) config.port = Number(args.flags.port);
+
+  const { runDoctor } = await import('../src/doctor.js');
+  const { results, healthy } = await runDoctor(config);
+
+  console.log();
+  for (const result of results) {
+    const mark = result.level === 'ok' ? green('✓') : result.level === 'warn' ? yellow('!') : red('✗');
+    console.log(`  ${mark} ${bold(result.label.padEnd(17))} ${result.detail}`);
+    if (result.fix) console.log(`      ${dim(result.fix)}`);
+  }
+  console.log();
+  console.log(
+    healthy
+      ? `  ${green('Ready.')} ${dim('Start it with `crc start`.')}`
+      : `  ${red('Not ready yet.')} ${dim('Fix the ✗ items above.')}`,
+  );
+  console.log();
+  return healthy;
 }
 
 async function cmdPair() {
@@ -161,13 +195,11 @@ async function cmdStatus() {
     }`,
   );
 
-  try {
-    const res = await fetch(`http://127.0.0.1:${config.port}/api/health`, { signal: AbortSignal.timeout(1500) });
-    const body = await res.json();
-    console.log(`  ${bold('Daemon')}      ${green(`running (v${body.version})`)}`);
-  } catch {
-    console.log(`  ${bold('Daemon')}      ${dim('not running')}`);
-  }
+  const { probeHealth } = await import('../src/doctor.js');
+  const health = await probeHealth(config.port);
+  console.log(
+    `  ${bold('Daemon')}      ${health ? green(`running (v${health.version})`) : dim('not running')}`,
+  );
   console.log();
 }
 
@@ -216,6 +248,9 @@ try {
   switch (command) {
     case 'start':
       await cmdStart(args);
+      break;
+    case 'doctor':
+      process.exitCode = (await cmdDoctor(args)) ? 0 : 1;
       break;
     case 'pair':
       await cmdPair();

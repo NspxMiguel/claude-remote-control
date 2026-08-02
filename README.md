@@ -49,6 +49,12 @@ commands, and ask your permission before it does.
   *Being signed into the Claude Desktop app is not enough on its own.*
 - **Tailscale** (optional, for access outside your network)
 
+Not sure? `npx crc doctor` checks all of it and tells you what to fix:
+
+```bash
+npx crc doctor
+```
+
 ## Quick start
 
 ```bash
@@ -82,6 +88,7 @@ npx crc start
 | Command | What it does |
 | --- | --- |
 | `crc start` | Run the daemon (default) |
+| `crc doctor` | Check Node, Claude Code, credentials, port, Tailscale |
 | `crc pair` | Print a fresh pairing QR code |
 | `crc status` | Addresses, Tailscale state, paired devices |
 | `crc token --rotate` | New master token; revokes every paired device |
