@@ -262,7 +262,14 @@ describe('diffStat', () => {
 
   test('a trailing newline does not invent a line', () => {
     assert.deepEqual(diffStat('Write', { content: 'a\nb\n' }), { added: 2, removed: 0 });
-    assert.deepEqual(diffStat('Write', { content: '' }), { added: 0, removed: 0 });
+  });
+
+  test('nothing to count means no diffstat, not a misleading zero', () => {
+    // Antigravity reports only the path of a file it wrote, so there is no
+    // content to measure — the summary row should stay silent rather than
+    // claim "+0".
+    assert.equal(diffStat('Write', { content: '' }), null);
+    assert.equal(diffStat('write_to_file', { TargetFile: '/tmp/x.txt' }), null);
   });
 
   test('an edit counts both sides', () => {

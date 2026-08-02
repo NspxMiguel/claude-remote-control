@@ -39,7 +39,30 @@ export function summarizeTool(name, input = {}) {
     case 'TaskCreate':
     case 'TaskUpdate':
       return { title: 'Tasks', subtitle: str(input.subject || '') };
-    default:
+    // Antigravity's tools carry the same meanings under different names.
+    case 'run_command':
+      return { title: 'Terminal', subtitle: str(input.command || input.CommandLine).split('\n')[0].slice(0, 200) };
+    case 'write_to_file':
+      return { title: 'Write', subtitle: base(input.file_path || input.TargetFile || input.path) };
+    case 'edit_file':
+    case 'replace_file_content':
+      return { title: 'Edit', subtitle: base(input.file_path || input.TargetFile || input.path) };
+    case 'view_file':
+    case 'read_file':
+      return { title: 'Read', subtitle: base(input.file_path || input.AbsolutePath || input.path) };
+    case 'list_dir':
+      return { title: 'List', subtitle: base(input.directory_path || input.DirectoryPath || input.path) };
+    case 'grep_search':
+    case 'codebase_search':
+      return { title: 'Search', subtitle: str(input.query || input.Query || input.pattern) };
+    case 'find_by_name':
+      return { title: 'Find files', subtitle: str(input.pattern || input.Pattern) };
+    case 'read_url_content':
+      return { title: 'Fetch', subtitle: str(input.url || input.Url) };
+    case 'search_web':
+      return { title: 'Web search', subtitle: str(input.query || input.Query) };
+
+    default: {
       if (name?.startsWith('mcp__')) {
         // mcp__Claude_Browser__navigate → "Claude Browser" / "navigate"
         const parts = name.split('__');
@@ -48,7 +71,13 @@ export function summarizeTool(name, input = {}) {
           subtitle: parts.slice(2).join('.'),
         };
       }
-      return { title: name || 'Tool', subtitle: '' };
+      if (!name) return { title: 'Tool', subtitle: '' };
+      // An unknown snake_case tool still reads better as words than as an id.
+      const title = name.includes('_')
+        ? name.replace(/_+/g, ' ').replace(/^./, (c) => c.toUpperCase())
+        : name;
+      return { title, subtitle: '' };
+    }
   }
 }
 
@@ -57,6 +86,7 @@ export function summarizeTool(name, input = {}) {
  * to the +N/-M diffstat; commands and lookups are counted but have no diffstat.
  */
 export const TOOL_KIND = {
+  // Claude Code
   Write: 'write',
   Edit: 'write',
   MultiEdit: 'write',
@@ -70,6 +100,19 @@ export const TOOL_KIND = {
   NotebookRead: 'read',
   WebFetch: 'read',
   WebSearch: 'read',
+  // Antigravity (agy) — snake_case names from its own tool registry
+  write_to_file: 'write',
+  edit_file: 'write',
+  replace_file_content: 'write',
+  run_command: 'run',
+  view_file: 'read',
+  read_file: 'read',
+  list_dir: 'read',
+  find_by_name: 'read',
+  grep_search: 'read',
+  codebase_search: 'read',
+  read_url_content: 'read',
+  search_web: 'read',
 };
 
 export const toolKind = (name) => TOOL_KIND[name] || 'other';
@@ -104,10 +147,18 @@ export function diffStat(name, input = {}, result) {
     return { added, removed };
   }
 
+  // Agents that report only the path of a file they wrote (Antigravity does)
+  // give nothing to count. Report no diffstat rather than a misleading "+0".
+  const estimate = estimateDiff(name, input);
+  return estimate.added === 0 && estimate.removed === 0 ? null : estimate;
+}
+
+function estimateDiff(name, input) {
   switch (name) {
     case 'Write':
+    case 'write_to_file':
       // A patch-less Write is a new file: everything in it is an addition.
-      return { added: countLines(input.content), removed: 0 };
+      return { added: countLines(input.content ?? input.CodeContent ?? input.code_content), removed: 0 };
     case 'Edit':
       return { added: countLines(input.new_string), removed: countLines(input.old_string) };
     case 'MultiEdit': {
@@ -125,6 +176,7 @@ export function diffStat(name, input = {}, result) {
       return { added: 0, removed: 0 };
   }
 }
+
 
 /** Flatten a tool result payload into something displayable without blowing up the DOM. */
 export function normalizeToolResult(raw, limit = 20000) {
@@ -377,6 +429,56 @@ export class Feed {
         diff: diffStat(item.name, item.input, payload),
       });
     }
+  }
+
+  // ---- generic driver events ------------------------------------------------------
+  // Agents that do not stream Anthropic-shaped messages feed the same transcript
+  // through these instead.
+
+  /** Append to the assistant message being typed, starting one if needed. */
+  appendTextDelta(text, kind = 'text') {
+    if (!text) return null;
+    const last = this.items.at(-1);
+    if (last?.kind === kind && last.streaming) {
+      return this.update(last, { text: (last.text || '') + text });
+    }
+    return this.append({ kind, text, streaming: true });
+  }
+
+  /** Mark the message being typed as finished, if there is one. */
+  finishStreamingText() {
+    const last = this.items.at(-1);
+    if (last?.streaming) this.update(last, { streaming: false });
+  }
+
+  addTool({ id, name, input = {} }) {
+    const existing = id ? this.toolIndex.get(id) : null;
+    if (existing) return existing;
+    const { title, subtitle } = summarizeTool(name, input);
+    const item = this.append({
+      kind: 'tool',
+      name,
+      toolUseId: id,
+      input,
+      title,
+      subtitle,
+      status: 'running',
+      diff: diffStat(name, input),
+    });
+    if (id) this.toolIndex.set(id, item);
+    return item;
+  }
+
+  completeTool({ id, result, isError, raw }) {
+    const item = this.toolIndex.get(id);
+    if (!item) return null;
+    const { text, truncated } = normalizeToolResult(result);
+    return this.update(item, {
+      status: isError ? 'error' : 'done',
+      result: text,
+      resultTruncated: truncated,
+      diff: diffStat(item.name, item.input, raw),
+    });
   }
 
   markToolRunning(toolUseId) {

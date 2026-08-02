@@ -324,7 +324,9 @@ export class RemoteControlServer {
     // --- state ---------------------------------------------------------------------
     if (route === 'state' && method === 'GET') {
       const { urls, tailscale } = await reachableUrls(this.config.port);
+      const { detectDrivers } = await import('./agent/drivers/index.js');
       json(res, 200, {
+        agents: await detectDrivers(this.config),
         version: PKG.version,
         hostname: os.hostname(),
         connectedClients: this.clients.size,
@@ -362,6 +364,7 @@ export class RemoteControlServer {
         resumeFrom: body.resumeFrom,
         forkSession: body.forkSession !== false,
         title: body.title,
+        driver: body.agent,
       });
       json(res, 201, { session: session.toJSON() });
       return;

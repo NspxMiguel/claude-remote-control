@@ -526,6 +526,8 @@ function renderHeader() {
   $('#session-title').textContent = session.title || 'Session';
   const bits = [];
   if (session.cwd) bits.push(session.cwd.replace(/^\/Users\/[^/]+/, '~'));
+  // Only name the agent when it is not the default, to keep the line short.
+  if (session.agent && session.agent !== 'claude-code') bits.push(session.agentLabel || session.agent);
   if (session.model) bits.push(session.model.replace(/^claude-/, ''));
   if (session.readOnly) bits.push('read-only mirror');
   $('#session-sub').textContent = bits.join(' · ');
@@ -700,6 +702,57 @@ function toast(message) {
   node._timer = setTimeout(() => {
     node.hidden = true;
   }, 3200);
+}
+
+/**
+ * Offer the agents that are actually installed. One that is missing still
+ * appears, disabled, with the command that installs it — more useful than
+ * pretending the app only ever supported one.
+ */
+function renderAgentPicker() {
+  const select = $('#new-agent');
+  const agents = state.serverState?.agents || [];
+  select.innerHTML = '';
+
+  for (const agent of agents) {
+    const option = document.createElement('option');
+    option.value = agent.id;
+    // Say why it is unusable — "not signed in" and "not installed" have very
+    // different fixes, and the option label is where you notice the difference.
+    option.textContent = agent.available ? agent.label : `${agent.label} — ${agent.detail || 'unavailable'}`;
+    option.disabled = !agent.available;
+    select.appendChild(option);
+  }
+
+  const firstAvailable = agents.find((a) => a.available);
+  if (firstAvailable) select.value = firstAvailable.id;
+  select.parentElement.querySelector('label[for=new-agent]').hidden = agents.length < 2;
+  select.hidden = agents.length < 2;
+  renderAgentNote();
+}
+
+/** Say plainly what the chosen agent cannot do, instead of silent surprises. */
+function renderAgentNote() {
+  const note = $('#agent-note');
+  const agents = state.serverState?.agents || [];
+  const agent = agents.find((a) => a.id === $('#new-agent').value);
+
+  // The model list here names Claude models; offering them for another agent
+  // would send it a model it has never heard of, which is a hard error.
+  $('#new-model').parentElement.hidden = Boolean(agent) && agent.id !== 'claude-code';
+
+  note.textContent = '';
+  if (!agent) return;
+
+  if (!agent.available) {
+    note.textContent = agent.fix || 'Not installed on this machine.';
+    return;
+  }
+  const missing = [];
+  if (!agent.capabilities?.permissions) missing.push('cannot ask before running tools');
+  if (!agent.capabilities?.images) missing.push('no image attachments');
+  if (!agent.capabilities?.models) missing.push('no model switching');
+  note.textContent = missing.length ? `Note: ${missing.join(', ')}.` : '';
 }
 
 async function openPicker(startPath) {
@@ -953,12 +1006,15 @@ function wireUp() {
   $('#new-session').addEventListener('click', async () => {
     const start = state.serverState?.defaults?.cwd || '~';
     $('#new-sheet').hidden = false;
+    renderAgentPicker();
     try {
       await openPicker(start);
     } catch (err) {
       toast(err.message);
     }
   });
+
+  $('#new-agent').addEventListener('change', () => renderAgentNote());
 
   $('#create-session').addEventListener('click', async () => {
     const cwd = $('#picker-path').dataset.path;
@@ -969,7 +1025,8 @@ function wireUp() {
         method: 'POST',
         body: JSON.stringify({
           cwd,
-          model: $('#new-model').value,
+          agent: $('#new-agent').value || undefined,
+          model: $('#new-model').parentElement.hidden ? undefined : $('#new-model').value,
           permissionMode: $('#new-perm').value,
         }),
       });

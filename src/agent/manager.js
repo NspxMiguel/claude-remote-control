@@ -19,7 +19,7 @@ export class SessionManager extends EventEmitter {
     return this.sessions.get(id) || null;
   }
 
-  create({ cwd, model, permissionMode, resumeFrom, forkSession, title } = {}) {
+  create({ cwd, model, permissionMode, resumeFrom, forkSession, title, driver } = {}) {
     const limit = this.config.maxSessions ?? 8;
     if (this.sessions.size >= limit) {
       throw Object.assign(
@@ -44,6 +44,7 @@ export class SessionManager extends EventEmitter {
       resumeFrom,
       forkSession,
       title,
+      driver,
     });
 
     session.on('patch', (patch) => this.emit('patch', { sessionId: session.id, patch }));

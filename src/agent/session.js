@@ -1,52 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { query } from '@anthropic-ai/claude-agent-sdk';
 import { Feed, summarizeTool } from '../protocol.js';
+import { getDriver, DEFAULT_DRIVER } from './drivers/index.js';
 import { log } from '../log.js';
-
-/**
- * Variables the Claude Code harness injects into its own child shells. If the
- * daemon happens to be launched from inside a Claude Code session, inheriting
- * these makes the spawned CLI try to authenticate against the *host* session's
- * proxy and fail. Strip them so sessions always use the machine's own login.
- */
-const HOST_SESSION_ENV = [
-  'CLAUDECODE',
-  'CLAUDE_CODE_ENTRYPOINT',
-  'CLAUDE_CODE_SESSION_ID',
-  'CLAUDE_CODE_HOST_SESSION_ID',
-  'CLAUDE_CODE_CHILD_SESSION',
-  'CLAUDE_CODE_EXECPATH',
-  'CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH',
-  'CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH',
-  'CLAUDE_AGENT_SDK_VERSION',
-  'CLAUDE_PID',
-  'CLAUDE_EFFORT',
-  'AI_AGENT',
-  'BAGGAGE',
-  // Enables a dialog-based tool this client cannot render.
-  'CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL',
-];
-
-function sanitizedEnv() {
-  const env = { ...process.env };
-  const insideHarness = env.CLAUDECODE === '1' || Boolean(env.CLAUDE_CODE_HOST_SESSION_ID);
-  if (!insideHarness) return env;
-
-  for (const key of HOST_SESSION_ENV) delete env[key];
-  // The host proxy URL only works with the host's own credentials.
-  if (env.CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH || process.env.CLAUDE_CODE_HOST_SESSION_ID) {
-    delete env.ANTHROPIC_BASE_URL;
-  }
-  return env;
-}
 
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 const MAX_IMAGES = 4;
 /** Base64 of roughly 3.7 MB of image data — comfortably above a resized photo. */
 const MAX_IMAGE_CHARS = 5 * 1024 * 1024;
 
-/** Reject anything that is not a plausible, in-budget image before it reaches Claude. */
+/** Reject anything that is not a plausible, in-budget image before it reaches the agent. */
 function validateImages(images) {
   if (!Array.isArray(images) || images.length === 0) return [];
   if (images.length > MAX_IMAGES) {
@@ -73,9 +36,9 @@ function validateImages(images) {
 }
 
 /**
- * Turn the SDK's terse failures into something a person holding a phone can act
- * on. These messages are the whole error UI on a small screen, so they name the
- * fix in this app's own terms rather than the SDK's.
+ * Turn an agent's terse failures into something a person holding a phone can
+ * act on. These messages are the whole error UI on a small screen, so they name
+ * the fix in this app's own terms rather than the agent's.
  */
 function friendlyError(text) {
   const message = text || '';
@@ -102,74 +65,34 @@ function friendlyError(text) {
 }
 
 /**
- * An async iterable you can push into. The SDK keeps a session alive for as
- * long as this stream stays open, which is what lets one `query()` serve a
- * whole back-and-forth conversation instead of one prompt.
+ * One conversation with one agent.
+ *
+ * Everything agent-specific lives in a driver (see ./drivers/README.md); this
+ * class owns the transcript, the status, and the permission prompts waiting on
+ * a human, so all agents behave identically from the phone's point of view.
  */
-class PushStream {
-  constructor() {
-    this.queue = [];
-    this.waiting = null;
-    this.closed = false;
-  }
-
-  push(value) {
-    if (this.closed) return;
-    if (this.waiting) {
-      const resolve = this.waiting;
-      this.waiting = null;
-      resolve({ value, done: false });
-    } else {
-      this.queue.push(value);
-    }
-  }
-
-  close() {
-    this.closed = true;
-    if (this.waiting) {
-      const resolve = this.waiting;
-      this.waiting = null;
-      resolve({ value: undefined, done: true });
-    }
-  }
-
-  [Symbol.asyncIterator]() {
-    return {
-      next: () => {
-        if (this.queue.length) return Promise.resolve({ value: this.queue.shift(), done: false });
-        if (this.closed) return Promise.resolve({ value: undefined, done: true });
-        return new Promise((resolve) => {
-          this.waiting = resolve;
-        });
-      },
-      return: () => {
-        this.close();
-        return Promise.resolve({ value: undefined, done: true });
-      },
-    };
-  }
-}
-
 export class Session extends EventEmitter {
-  constructor({ config, id, cwd, model, permissionMode, resumeFrom, forkSession = true, title }) {
+  constructor({ config, id, cwd, model, permissionMode, resumeFrom, forkSession = true, title, driver }) {
     super();
     this.config = config;
     this.id = id || randomUUID();
     this.cwd = cwd;
-    this.model = model || config.defaultModel;
+    this.driverId = driver || DEFAULT_DRIVER;
+    // `defaultModel` names a Claude model, so it only makes sense for Claude
+    // Code. Another agent with no explicit choice uses whatever it defaults to —
+    // passing "sonnet" to Antigravity is a hard error on its side.
+    this.model = model || (this.driverId === DEFAULT_DRIVER ? config.defaultModel : null);
     this.permissionMode = permissionMode || config.defaultPermissionMode;
     this.resumeFrom = resumeFrom || null;
     this.forkSession = forkSession;
     this.title = title || null;
-    this.origin = 'remote';
 
     this.status = 'starting';
     this.createdAt = Date.now();
     this.lastActivityAt = Date.now();
-    this.claudeSessionId = null;
-    this.claudeVersion = null;
+    this.agentSessionId = null;
+    this.agentVersion = null;
     this.tools = [];
-    this.slashCommands = [];
     this.availableModels = null;
     this.totalCostUsd = 0;
     this.numTurns = 0;
@@ -183,9 +106,31 @@ export class Session extends EventEmitter {
       onPatch: (patch) => this.emit('patch', patch),
     });
 
-    this.input = new PushStream();
-    this.query = null;
-    this.abort = new AbortController();
+    const module = getDriver(this.driverId);
+    if (!module) {
+      throw Object.assign(new Error(`Unknown agent: ${this.driverId}`), { status: 400 });
+    }
+    this.capabilities = module.capabilities;
+    this.driverLabel = module.label;
+    this.driver = module.createDriver({
+      cwd: this.cwd,
+      model: this.model,
+      permissionMode: this.permissionMode,
+      resumeFrom: this.resumeFrom,
+      forkSession: this.forkSession,
+      config,
+      emit: (event) => this.handleEvent(event),
+      requestPermission: (toolName, input, opts) => this.requestPermission(toolName, input, opts),
+    });
+  }
+
+  // Kept for callers and tests that predate multiple agents.
+  get claudeSessionId() {
+    return this.agentSessionId;
+  }
+
+  get claudeVersion() {
+    return this.agentVersion;
   }
 
   get busy() {
@@ -203,13 +148,18 @@ export class Session extends EventEmitter {
     return {
       id: this.id,
       kind: 'remote',
+      agent: this.driverId,
+      agentLabel: this.driverLabel,
+      capabilities: this.capabilities,
       title: this.title || this.derivedTitle(),
       cwd: this.cwd,
       model: this.model,
       permissionMode: this.permissionMode,
       status: this.status,
-      claudeSessionId: this.claudeSessionId,
-      claudeVersion: this.claudeVersion,
+      claudeSessionId: this.agentSessionId,
+      agentSessionId: this.agentSessionId,
+      agentVersion: this.agentVersion,
+      claudeVersion: this.agentVersion,
       createdAt: this.createdAt,
       lastActivityAt: this.lastActivityAt,
       totalCostUsd: this.totalCostUsd,
@@ -228,124 +178,134 @@ export class Session extends EventEmitter {
   }
 
   start() {
-    const options = {
-      cwd: this.cwd,
-      model: this.model,
-      permissionMode: this.permissionMode,
-      includePartialMessages: true,
-      abortController: this.abort,
-      canUseTool: (toolName, input, opts) => this.requestPermission(toolName, input, opts),
-      // Load the same CLAUDE.md, settings and MCP servers the desktop app uses,
-      // so a remote session behaves like sitting at the machine.
-      settingSources: ['user', 'project', 'local'],
-      env: sanitizedEnv(),
-    };
-    if (this.config.claudeExecutable) {
-      options.pathToClaudeCodeExecutable = this.config.claudeExecutable;
-    }
-    if (this.config.disallowedTools?.length) {
-      options.disallowedTools = this.config.disallowedTools;
-    }
-    if (this.resumeFrom) {
-      options.resume = this.resumeFrom;
-      options.forkSession = this.forkSession;
-    }
-
-    this.query = query({ prompt: this.input, options });
-    this.consume();
+    Promise.resolve(this.driver.start()).catch((err) => {
+      this.fail(err?.message || String(err));
+    });
     return this;
   }
 
-  async consume() {
-    try {
-      for await (const message of this.query) {
-        this.lastActivityAt = Date.now();
-        this.handleMessage(message);
-      }
-      this.setStatus('ended');
-    } catch (err) {
-      if (this.abort.signal.aborted) {
-        this.setStatus('ended');
-        return;
-      }
-      const text = friendlyError(err?.message || String(err));
-      log.error(`session ${this.id} failed:`, text);
-      this.lastError = text;
-      this.feed.append({ kind: 'error', text });
-      this.setStatus('error');
-    } finally {
-      this.rejectAllPermissions('Session ended');
-    }
+  fail(text) {
+    const message = friendlyError(text);
+    log.error(`session ${this.id} failed:`, message);
+    this.lastError = message;
+    this.feed.append({ kind: 'error', text: message });
+    this.setStatus('error');
+    this.rejectAllPermissions('Session ended');
   }
 
-  handleMessage(message) {
-    switch (message.type) {
-      case 'system':
-        if (message.subtype === 'init') {
-          this.claudeSessionId = message.session_id;
-          this.claudeVersion = message.claude_code_version;
-          this.tools = message.tools || [];
-          this.slashCommands = message.slash_commands || [];
-          if (message.model) this.model = message.model;
-          if (message.permissionMode) this.permissionMode = message.permissionMode;
+  // ---- driver events ----------------------------------------------------------------
+
+  handleEvent(event) {
+    this.lastActivityAt = Date.now();
+
+    switch (event.type) {
+      // Some agents are usable before they have a conversation to report — one
+      // process per turn means the real init only lands with the first prompt.
+      case 'ready':
+      case 'init':
+        if (event.sessionId) this.agentSessionId = event.sessionId;
+        if (event.version) this.agentVersion = event.version;
+        if (event.tools?.length) this.tools = event.tools;
+        if (event.model) this.model = event.model;
+        if (event.permissionMode) this.permissionMode = event.permissionMode;
+        // Some agents report init once when they are ready and again per turn;
+        // announce the connection only the first time.
+        if (!this.announced) {
+          this.announced = true;
           this.feed.append({
             kind: 'system',
-            text: `Connected to Claude Code ${message.claude_code_version || ''}`.trim(),
-            model: message.model,
-            cwd: message.cwd,
+            text: event.greeting || `Connected to ${this.driverLabel}`,
+            model: event.model,
+            cwd: event.cwd,
           });
-          this.setStatus(this.status === 'starting' ? 'idle' : this.status);
           this.loadModels();
-        } else if (message.subtype === 'compact_boundary') {
-          this.feed.append({ kind: 'system', text: 'Context compacted' });
         }
+        if (this.status === 'starting') this.setStatus('idle');
         break;
 
-      case 'stream_event':
-        this.feed.handleStreamEvent(message);
+      // Anthropic-shaped messages, passed through for token-level streaming.
+      case 'raw_stream':
+        this.feed.handleStreamEvent(event.event);
+        break;
+      case 'raw_assistant':
+        this.feed.handleAssistant(event.message);
+        break;
+      case 'raw_tool_results':
+        this.feed.handleToolResults(event.message);
         break;
 
-      case 'assistant':
-        this.feed.handleAssistant(message);
+      case 'text_delta':
+        this.feed.appendTextDelta(event.text, 'text');
+        break;
+      case 'thinking_delta':
+        this.feed.appendTextDelta(event.text, 'thinking');
+        break;
+      case 'text':
+        this.feed.finishStreamingText();
+        if (event.text?.trim()) this.feed.append({ kind: 'text', text: event.text });
+        break;
+      case 'thinking':
+        if (event.text?.trim()) this.feed.append({ kind: 'thinking', text: event.text });
         break;
 
-      case 'user':
-        // Echoes of our own prompt carry no tool results; skip those.
-        if (message.tool_use_result !== undefined || Array.isArray(message.message?.content)) {
-          this.feed.handleToolResults(message);
-        }
+      case 'tool':
+        this.feed.finishStreamingText();
+        this.feed.addTool(event);
+        break;
+      case 'tool_result':
+        this.feed.completeTool(event);
+        break;
+
+      case 'notice':
+        this.feed.append({ kind: 'system', text: event.text });
         break;
 
       case 'result':
-        this.numTurns = message.num_turns ?? this.numTurns;
-        if (typeof message.total_cost_usd === 'number') this.totalCostUsd = message.total_cost_usd;
-        if (message.subtype === 'error' || message.is_error) {
-          this.lastError = friendlyError(message.error || message.result || 'Turn failed');
-          this.feed.append({ kind: 'error', text: this.lastError });
-        } else {
-          this.feed.append({
-            kind: 'result',
-            durationMs: message.duration_ms,
-            costUsd: message.total_cost_usd,
-            numTurns: message.num_turns,
-            usage: message.usage || null,
-          });
-        }
+        this.feed.finishStreamingText();
+        if (typeof event.numTurns === 'number') this.numTurns = event.numTurns;
+        else this.numTurns += 1;
+        if (typeof event.costUsd === 'number') this.totalCostUsd = event.costUsd;
+        this.feed.append({
+          kind: 'result',
+          durationMs: event.durationMs,
+          costUsd: event.costUsd,
+          numTurns: this.numTurns,
+          usage: event.usage || null,
+        });
         this.setStatus('idle');
         break;
 
+      case 'error': {
+        this.feed.finishStreamingText();
+        const text = friendlyError(event.text);
+        this.lastError = text;
+        this.feed.append({ kind: 'error', text });
+        if (event.fatal) {
+          this.setStatus('error');
+          this.rejectAllPermissions('Session ended');
+        } else {
+          this.setStatus('idle');
+        }
+        break;
+      }
+
+      case 'ended':
+        this.feed.finishStreamingText();
+        if (this.status !== 'error') this.setStatus('ended');
+        this.rejectAllPermissions('Session ended');
+        break;
+
       default:
-        log.debug(`session ${this.id}: unhandled message type ${message.type}`);
+        log.debug(`session ${this.id}: unhandled driver event ${event.type}`);
     }
   }
 
   async loadModels() {
+    if (!this.capabilities.models) return;
     try {
-      const models = await this.query.supportedModels?.();
+      const models = await this.driver.supportedModels?.();
       if (Array.isArray(models) && models.length) {
-        this.availableModels = models.map((m) =>
-          typeof m === 'string' ? { id: m, name: m } : { id: m.value || m.id, name: m.displayName || m.name || m.id },
-        );
+        this.availableModels = models;
         this.emit('state', this.toJSON());
       }
     } catch (err) {
@@ -353,7 +313,7 @@ export class Session extends EventEmitter {
     }
   }
 
-  // ---- input ----------------------------------------------------------------------
+  // ---- input ------------------------------------------------------------------------
 
   /**
    * @param {string} text
@@ -362,32 +322,25 @@ export class Session extends EventEmitter {
   send(text, images = []) {
     const attachments = validateImages(images);
     if (!text?.trim() && !attachments.length) return false;
-    if (this.status === 'ended' || this.input.closed) {
+    if (this.status === 'ended' || this.driver.closed) {
       throw Object.assign(new Error('This session has ended — start a new one.'), { status: 409 });
+    }
+    if (attachments.length && !this.capabilities.images) {
+      throw Object.assign(new Error(`${this.driverLabel} cannot accept images.`), { status: 400 });
     }
 
     // The feed keeps a note of attachments, not the bytes: it is replayed in
     // full on every reconnect, and megabytes of base64 would make that painful.
     this.feed.append({ kind: 'user', text, attachments: attachments.length || undefined });
-
-    const content = attachments.length
-      ? [
-          ...attachments.map((image) => ({
-            type: 'image',
-            source: { type: 'base64', media_type: image.mediaType, data: image.data },
-          })),
-          ...(text?.trim() ? [{ type: 'text', text }] : []),
-        ]
-      : text;
-
-    this.input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
+    this.driver.send(text, attachments);
     this.setStatus('busy');
     return true;
   }
 
   async interrupt() {
+    if (!this.capabilities.interrupt) return false;
     try {
-      await this.query?.interrupt?.();
+      await this.driver.interrupt?.();
       this.feed.append({ kind: 'system', text: 'Interrupted from remote' });
       this.setStatus('idle');
       return true;
@@ -398,23 +351,23 @@ export class Session extends EventEmitter {
   }
 
   async setModel(model) {
-    await this.query?.setModel?.(model);
+    await this.driver.setModel?.(model);
     this.model = model;
     this.feed.append({ kind: 'system', text: `Model switched to ${model}` });
     this.emit('state', this.toJSON());
   }
 
   async setPermissionMode(mode) {
-    await this.query?.setPermissionMode?.(mode);
+    await this.driver.setPermissionMode?.(mode);
     this.permissionMode = mode;
     this.feed.append({ kind: 'system', text: `Permission mode: ${mode}` });
     this.emit('state', this.toJSON());
   }
 
-  // ---- permissions ----------------------------------------------------------------
+  // ---- permissions ------------------------------------------------------------------
 
   /**
-   * Called by the SDK whenever a tool needs a human. We park the promise and
+   * Called by a driver whenever a tool needs a human. We park the promise and
    * push the decision to every connected phone; whoever answers first wins.
    */
   requestPermission(toolName, input, opts = {}) {
@@ -441,13 +394,14 @@ export class Session extends EventEmitter {
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        this.finishPermission(requestId, {
-          behavior: 'deny',
-          message: 'No answer from the remote device in time.',
-        }, 'timeout');
+        this.finishPermission(
+          requestId,
+          { behavior: 'deny', message: 'No answer from the remote device in time.' },
+          'timeout',
+        );
       }, this.config.permissionTimeoutSec * 1000);
 
-      // If Claude Code gives up on the request, stop waiting on a human.
+      // If the agent gives up on the request, stop waiting on a human.
       opts.signal?.addEventListener?.('abort', () => {
         this.finishPermission(requestId, { behavior: 'deny', message: 'Cancelled.' }, 'cancelled');
       });
@@ -467,6 +421,7 @@ export class Session extends EventEmitter {
       const result = { behavior: 'allow' };
       if (updatedInput && typeof updatedInput === 'object') result.updatedInput = updatedInput;
       if (decision === 'allow_always' || remember) {
+        result.always = true;
         result.updatedPermissions = [
           {
             type: 'addRules',
@@ -510,12 +465,7 @@ export class Session extends EventEmitter {
 
   async close() {
     this.rejectAllPermissions('Session closed');
-    this.input.close();
-    try {
-      this.abort.abort();
-    } catch {
-      /* already gone */
-    }
+    await this.driver.close?.();
     this.setStatus('ended');
   }
 }

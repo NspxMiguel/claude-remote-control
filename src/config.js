@@ -44,6 +44,10 @@ const DEFAULTS = {
    * set it when `claude` lives somewhere unusual (nvm, a pinned version).
    */
   claudeExecutable: null,
+  /** Path to Cursor's agent binary, if it is not on PATH or in ~/.local/bin. */
+  acpExecutable: null,
+  /** Path to Antigravity's `agy` binary, same idea. */
+  antigravityExecutable: null,
   /** Keep this many feed items in memory per session. */
   maxFeedItems: 2000,
   /** Cap on concurrent live sessions — each one is a Claude Code process. */
