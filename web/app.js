@@ -748,7 +748,9 @@ function renderAgentSettings(agents) {
     if (credential) {
       if (credential.set) {
         const stored = el('div', 'agent-key');
-        stored.appendChild(el('span', 'small muted', `${credential.label}: ${credential.hint}`));
+        stored.appendChild(
+          el('span', 'small muted', `${credential.kind || credential.label}: ${credential.hint}`),
+        );
         const remove = el('button', 'link-btn', 'Remove');
         remove.type = 'button';
         remove.addEventListener('click', async () => {

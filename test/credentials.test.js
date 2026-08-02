@@ -90,6 +90,21 @@ describe('using a key', () => {
     assert.equal(CREDENTIAL_SPECS.antigravity.envVar, 'GEMINI_API_KEY');
   });
 
+  test('a subscription token goes in the OAuth variable, not the API-key one', () => {
+    // `claude setup-token` prints sk-ant-oat…, which bills the subscription and
+    // only authenticates when exported as CLAUDE_CODE_OAUTH_TOKEN.
+    const token = 'sk-ant-oat01-0000000000000000000000000000BEEF';
+    setCredential(config, 'claude-code', token);
+    assert.deepEqual(credentialEnv(config, 'claude-code'), { CLAUDE_CODE_OAUTH_TOKEN: token });
+    assert.equal(describeCredential(config, 'claude-code').kind, 'subscription token');
+  });
+
+  test('a console API key still goes in the API-key variable', () => {
+    setCredential(config, 'claude-code', KEY);
+    assert.deepEqual(credentialEnv(config, 'claude-code'), { ANTHROPIC_API_KEY: KEY });
+    assert.equal(describeCredential(config, 'claude-code').kind, 'API key');
+  });
+
   test('no key means no environment change at all', () => {
     assert.deepEqual(credentialEnv(config, 'claude-code'), {});
     assert.deepEqual(credentialEnv(config, 'not-an-agent'), {});

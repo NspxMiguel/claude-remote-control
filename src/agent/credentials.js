@@ -19,13 +19,21 @@ import { saveConfig } from '../config.js';
 export const CREDENTIAL_SPECS = {
   'claude-code': {
     envVar: 'ANTHROPIC_API_KEY',
-    label: 'Anthropic API key',
-    placeholder: 'sk-ant-…',
-    login: 'claude',
+    /**
+     * Two different credentials work here and they are not interchangeable.
+     * `claude setup-token` prints an OAuth token that bills your subscription
+     * and must be exported as CLAUDE_CODE_OAUTH_TOKEN; a console API key bills
+     * per token and goes in ANTHROPIC_API_KEY. Pasting one into the other's
+     * variable simply fails to authenticate, so the prefix decides.
+     */
+    envVarFor: (key) => (key.startsWith('sk-ant-oat') ? 'CLAUDE_CODE_OAUTH_TOKEN' : 'ANTHROPIC_API_KEY'),
+    label: 'Subscription token or API key',
+    placeholder: 'sk-ant-oat… or sk-ant-api…',
+    login: 'claude setup-token',
     loginHint:
-      'Run `claude` in a terminal on the host and sign in with /login — that uses your Claude ' +
-      'subscription and needs no key here. `claude setup-token` prints a long-lived token you ' +
-      'can paste instead.',
+      'Run `claude setup-token` on the host: it signs in with your Claude subscription and ' +
+      'prints a token to paste here. A console API key works too, and is billed per token ' +
+      'instead of against your plan.',
   },
   acp: {
     envVar: 'CURSOR_API_KEY',
@@ -51,13 +59,14 @@ export function describeCredential(config, agentId) {
   if (!spec) return null;
   const stored = config.credentials?.[agentId]?.apiKey;
   return {
-    envVar: spec.envVar,
+    envVar: stored && spec.envVarFor ? spec.envVarFor(stored) : spec.envVar,
     label: spec.label,
     placeholder: spec.placeholder,
     login: spec.login,
     loginHint: spec.loginHint,
     set: Boolean(stored),
     hint: stored ? maskKey(stored) : null,
+    kind: stored ? credentialKind(agentId, stored) : null,
   };
 }
 
@@ -98,7 +107,14 @@ export function credentialEnv(config, agentId) {
   const spec = CREDENTIAL_SPECS[agentId];
   const key = config?.credentials?.[agentId]?.apiKey;
   if (!spec || !key) return {};
-  return { [spec.envVar]: key };
+  const envVar = spec.envVarFor ? spec.envVarFor(key) : spec.envVar;
+  return { [envVar]: key };
+}
+
+/** Which credential the user actually pasted, for the UI to confirm back. */
+export function credentialKind(agentId, key) {
+  if (agentId !== 'claude-code') return null;
+  return String(key).startsWith('sk-ant-oat') ? 'subscription token' : 'API key';
 }
 
 export function hasCredential(config, agentId) {
