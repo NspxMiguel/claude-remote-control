@@ -189,6 +189,9 @@ export class Session extends EventEmitter {
       settingSources: ['user', 'project', 'local'],
       env: sanitizedEnv(),
     };
+    if (this.config.claudeExecutable) {
+      options.pathToClaudeCodeExecutable = this.config.claudeExecutable;
+    }
     if (this.resumeFrom) {
       options.resume = this.resumeFrom;
       options.forkSession = this.forkSession;

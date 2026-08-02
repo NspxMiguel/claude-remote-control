@@ -190,6 +190,9 @@ network resumes with `?since=<seq>` instead of refetching the conversation.
   aren't forwarded; the tool will hang until it times out.
 - **Mirrored sessions are read-only.** Writing into a transcript another process
   owns would corrupt it, so taking over forks instead.
+- **Restarting the daemon ends live sessions.** They live in memory. The
+  conversation itself is safe — it reappears under *On this machine*, and
+  **Take over** picks it back up.
 - **No TLS**, as described above.
 
 ## Development
@@ -198,9 +201,12 @@ network resumes with `?since=<seq>` instead of refetching the conversation.
 npm test
 ```
 
-84 tests covering the feed protocol, transcript parsing, auth, path
-confinement, and the HTTP/WebSocket surface. No network or credentials needed —
-the suite never spawns a real Claude session.
+97 tests covering the feed protocol, transcript parsing, auth, path
+confinement, and the HTTP/WebSocket surface. No network or credentials needed:
+session tests run against a fake Claude Code executable
+(`test/fixtures/fake-claude.mjs`) that speaks the Agent SDK's control protocol,
+so streaming, permission approval, denial, timeout and interrupts are all
+exercised end to end.
 
 ```bash
 npm run icons

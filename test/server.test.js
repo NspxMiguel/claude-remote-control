@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
 // realpath because macOS hands out /var/... paths that are symlinks to /private/var/...,
@@ -51,6 +52,9 @@ before(async () => {
   config.host = '127.0.0.1';
   config.allowedRoots = [WORK];
   config.defaultCwd = WORK;
+  // Live sessions run against the fake Claude Code, so the suite needs no credentials.
+  config.claudeExecutable = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
+  config.permissionTimeoutSec = 10;
   saveConfig(config);
 
   server = new RemoteControlServer(config);
@@ -318,6 +322,101 @@ describe('websocket', () => {
     assert.equal(feed.sessionId, SESSION_ID);
     assert.ok(feed.items.length > 0);
     ws.close();
+  });
+
+  test('a full turn works over the socket: prompt, permission, result', async () => {
+    const { session } = await (
+      await get('/api/sessions', config.token, { method: 'POST', body: JSON.stringify({ cwd: WORK }) })
+    ).json();
+
+    const ws = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${encodeURIComponent(config.token)}`);
+    await new Promise((resolve) => ws.on('open', resolve));
+    ws.send(JSON.stringify({ t: 'subscribe', sessionId: session.id, since: 0 }));
+
+    const seen = { tools: new Map(), texts: [], result: null, permission: null };
+
+    const finished = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('turn never completed')), 20000);
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+
+        if (msg.t === 'permission') {
+          seen.permission = msg.payload;
+          // Approve from "the phone".
+          ws.send(
+            JSON.stringify({
+              t: 'permission',
+              sessionId: session.id,
+              requestId: msg.payload.requestId,
+              decision: 'allow',
+            }),
+          );
+        }
+        if (msg.t === 'patch' && msg.item) {
+          if (msg.item.kind === 'tool') seen.tools.set(msg.item.id, msg.item);
+          if (msg.item.kind === 'text') seen.texts.push(msg.item.text);
+          if (msg.item.kind === 'result') {
+            seen.result = msg.item;
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+    });
+
+    // Wait for the session to come up before prompting it.
+    for (let i = 0; i < 60; i++) {
+      const state = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+      if (state.state.status === 'idle') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    ws.send(JSON.stringify({ t: 'prompt', sessionId: session.id, text: 'socket-turn' }));
+    await finished;
+
+    assert.ok(seen.permission, 'the phone was asked for permission');
+    assert.equal(seen.permission.toolName, 'Bash');
+    assert.equal(seen.permission.subtitle, 'echo socket-turn');
+
+    const tool = [...seen.tools.values()].at(-1);
+    assert.equal(tool.status, 'done');
+    assert.equal(tool.result, 'socket-turn');
+    assert.ok(seen.texts.some((t) => t.includes('Done: socket-turn')));
+    assert.ok(seen.result.costUsd > 0);
+
+    // A late-joining client can replay the same conversation over REST.
+    const replay = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+    assert.ok(replay.items.some((i) => i.kind === 'result'));
+    assert.deepEqual(
+      replay.items.map((i) => i.ord),
+      [...replay.items.map((i) => i.ord)].sort((a, b) => a - b),
+    );
+
+    ws.close();
+    await get(`/api/sessions/${session.id}`, config.token, { method: 'DELETE' });
+  });
+
+  test('interrupting over REST settles the session', async () => {
+    const { session } = await (
+      await get('/api/sessions', config.token, { method: 'POST', body: JSON.stringify({ cwd: WORK }) })
+    ).json();
+
+    for (let i = 0; i < 60; i++) {
+      const state = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+      if (state.state.status === 'idle') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    await get(`/api/sessions/${session.id}/message`, config.token, {
+      method: 'POST',
+      body: JSON.stringify({ text: 'will-be-interrupted' }),
+    });
+    const res = await get(`/api/sessions/${session.id}/interrupt`, config.token, { method: 'POST' });
+    assert.equal(res.status, 200);
+
+    const after = await (await get(`/api/sessions/${session.id}/feed?since=0`)).json();
+    assert.equal(after.state.status, 'idle');
+    await get(`/api/sessions/${session.id}`, config.token, { method: 'DELETE' });
   });
 
   test('prompting a mirror reports an error instead of crashing', async () => {

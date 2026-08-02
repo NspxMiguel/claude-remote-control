@@ -39,6 +39,11 @@ const DEFAULTS = {
   defaultPermissionMode: 'default',
   /** Seconds a permission request waits for a human before it is denied. */
   permissionTimeoutSec: 600,
+  /**
+   * Path to the Claude Code executable. Leave null to let the SDK find it;
+   * set it when `claude` lives somewhere unusual (nvm, a pinned version).
+   */
+  claudeExecutable: null,
   /** Keep this many feed items in memory per session. */
   maxFeedItems: 2000,
 };
