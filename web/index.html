@@ -25,27 +25,42 @@
         <path d="M12.5 18h7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
       </svg>
       <div>
-        <h1 data-i18n="gate.title">Your machine, in your pocket</h1>
-        <p class="muted" data-i18n="gate.sub">Pair this device to drive Claude on your Mac.</p>
+        <p class="step-label" data-i18n="gate.step">Step 1 of 3</p>
+        <h1 data-i18n="gate.title">The code on your screen</h1>
+        <p class="muted" data-i18n="gate.sub">Click <code>&gt;_</code> in your Mac's menu bar and read the six digits.</p>
       </div>
     </div>
 
-    <button id="scan-open" type="button" class="primary wide" data-i18n="gate.scan">Scan the QR code</button>
-    <p id="scan-note" class="hint"></p>
-    <input id="scan-file" type="file" accept="image/*" capture="environment" hidden />
-
-    <div class="gate-or"><span data-i18n="gate.or">or type the code</span></div>
-
     <form id="pair-form">
-      <label for="pair-input" data-i18n="gate.codeLabel">Pairing code or master token</label>
-      <input id="pair-input" type="text" inputmode="numeric" autocomplete="one-time-code"
-             placeholder="123456" spellcheck="false" required />
-      <label for="pair-name" data-i18n="gate.nameLabel">Device name</label>
-      <input id="pair-name" type="text" placeholder="iPhone" spellcheck="false" />
+      <!-- Six boxes rather than one field: it is how the code is read off a
+           screen, and it makes a typo obvious before you finish. -->
+      <div id="code-boxes" class="code-boxes">
+        <input class="code-box" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="1" />
+        <input class="code-box" inputmode="numeric" maxlength="1" aria-label="2" />
+        <input class="code-box" inputmode="numeric" maxlength="1" aria-label="3" />
+        <input class="code-box" inputmode="numeric" maxlength="1" aria-label="4" />
+        <input class="code-box" inputmode="numeric" maxlength="1" aria-label="5" />
+        <input class="code-box" inputmode="numeric" maxlength="1" aria-label="6" />
+      </div>
+      <input id="pair-input" type="text" hidden />
+      <input id="pair-name" type="text" placeholder="iPhone" spellcheck="false" hidden />
       <button type="submit" class="primary wide" data-i18n="gate.pair">Pair device</button>
       <p id="pair-error" class="error" hidden></p>
     </form>
-    <p class="hint">The code is in the menu bar on your Mac: click <code>&gt;_</code> ▸ <strong>Show pairing code</strong>. It lasts ten minutes. No menu bar app? Run <code>crc pair</code> in a terminal.</p>
+
+    <div class="gate-or"><span data-i18n="gate.or">or</span></div>
+
+    <button id="scan-open" type="button" class="ghost-btn wide" data-i18n="gate.scan">Scan the QR code</button>
+    <p id="scan-note" class="hint"></p>
+    <input id="scan-file" type="file" accept="image/*" capture="environment" hidden />
+
+    <details class="gate-more">
+      <summary data-i18n="gate.noCode">No code on screen?</summary>
+      <p class="hint" data-i18n="gate.hint">Open the app on your Mac and click <code>&gt;_</code> ▸ <strong>Show pairing code</strong>. It lasts ten minutes. Without the menu bar app, run <code>crc pair</code> in a terminal.</p>
+      <label for="pair-token" data-i18n="gate.tokenLabel">Or paste the master token</label>
+      <input id="pair-token" type="text" spellcheck="false" placeholder="sk…" />
+      <button id="pair-token-go" type="button" class="ghost-btn wide" data-i18n="gate.pair">Pair device</button>
+    </details>
   </div>
 </div>
 
@@ -126,6 +141,7 @@
     </button>
 
     <nav class="session-groups">
+      <section id="machines" class="machines" hidden></section>
       <section>
         <h2><span data-i18n="app.live">Live</span> <span id="live-count" class="count">0</span></h2>
         <ul id="live-list" class="session-list"></ul>
@@ -245,6 +261,17 @@
         </select>
       </div>
       <div>
+        <label for="new-effort">Thinking</label>
+        <select id="new-effort">
+          <option value="">Agent default</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="xhigh">Extra high</option>
+          <option value="max">Max</option>
+        </select>
+      </div>
+      <div>
         <label for="new-perm">Permissions</label>
         <select id="new-perm">
           <option value="default">Ask me (recommended)</option>
@@ -267,6 +294,14 @@
     </header>
     <div id="opts-body"></div>
     <select id="opt-model" hidden></select>
+    <select id="opt-effort" hidden>
+      <option value="">Agent default</option>
+      <option value="low">Low</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+      <option value="xhigh">Extra high</option>
+      <option value="max">Max</option>
+    </select>
     <select id="opt-perm" hidden>
       <option value="default">Ask me</option>
       <option value="acceptEdits">Auto-accept edits</option>

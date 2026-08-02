@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { clampEffort } from '../../effort.js';
 import { log } from '../../log.js';
 import { parseLines } from '../../mirror/transcript.js';
 
@@ -186,7 +187,8 @@ class AntigravityDriver {
     this.cwd = cwd || process.cwd();
     this.model = model || config.antigravityModel || null;
     this.permissionMode = permissionMode || 'default';
-    this.effort = options.effort || config.antigravityEffort || null;
+    // agy documents low|medium|high only; asking for more is a hard error.
+    this.effort = clampEffort(options.effort || config.antigravityEffort, { maxLevel: 'high' });
     this.printTimeout = options.printTimeout || config.antigravityPrintTimeout || null;
     // The session's folder has to be *in the workspace*, not merely the process
     // working directory. Without it, agy writes into its own scratch — I asked

@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws';
 
 import { Auth, clientIp, extractToken } from './auth.js';
 import { isPathAllowed, PERMISSION_MODES, realPath, saveConfig } from './config.js';
+import { EFFORT_LEVELS, isEffort } from './effort.js';
 import { SessionManager } from './agent/manager.js';
 import { MirrorStore } from './mirror/store.js';
 import { reachableUrls } from './net.js';
@@ -34,6 +35,18 @@ const MIME = {
  * treat it as "ask about everything", which is precisely what someone setting
  * a mode by hand is trying to get away from.
  */
+/** Same idea as the permission mode: an unknown level must not reach an agent. */
+function checkEffort(effort) {
+  if (effort === undefined || effort === null || effort === '') return undefined;
+  if (!isEffort(effort)) {
+    throw Object.assign(
+      new Error(`Unknown effort: ${effort}. Use one of ${EFFORT_LEVELS.join(', ')}.`),
+      { status: 400 },
+    );
+  }
+  return effort;
+}
+
 function checkPermissionMode(mode) {
   if (mode === undefined || mode === null) return undefined;
   if (!PERMISSION_MODES.includes(mode)) {
@@ -333,7 +346,13 @@ export class RemoteControlServer {
         name: body.name,
         userAgent: req.headers['user-agent'],
       });
-      json(res, 200, { token: device.token, device: { id: device.id, name: device.name } });
+      // The hostname rides along so a phone paired with several Macs can name
+      // them apart in its own list.
+      json(res, 200, {
+        token: device.token,
+        hostname: os.hostname(),
+        device: { id: device.id, name: device.name },
+      });
       return;
     }
 
@@ -363,6 +382,7 @@ export class RemoteControlServer {
           cwd: this.config.defaultCwd,
           model: this.config.defaultModel,
           permissionMode: this.config.defaultPermissionMode,
+          effort: this.config.defaultEffort,
           allowedRoots: this.config.allowedRoots,
         },
         // Tokens are never included. Any paired device can already run commands
@@ -386,6 +406,7 @@ export class RemoteControlServer {
         cwd: body.cwd,
         model: body.model,
         permissionMode: checkPermissionMode(body.permissionMode),
+        effort: checkEffort(body.effort),
         resumeFrom: body.resumeFrom,
         forkSession: body.forkSession !== false,
         title: body.title,
@@ -428,6 +449,12 @@ export class RemoteControlServer {
       if (action === 'model' && method === 'POST') {
         const body = await readJsonBody(req);
         await session.setModel(body.model);
+        json(res, 200, { session: session.toJSON() });
+        return;
+      }
+      if (action === 'effort' && method === 'POST') {
+        const body = await readJsonBody(req);
+        await session.setEffort(checkEffort(body.effort) || null);
         json(res, 200, { session: session.toJSON() });
         return;
       }
@@ -609,7 +636,8 @@ export class RemoteControlServer {
     if (route === 'settings' && method === 'POST') {
       const body = await readJsonBody(req);
       checkPermissionMode(body.defaultPermissionMode);
-      for (const key of ['defaultCwd', 'defaultModel', 'defaultPermissionMode']) {
+      checkEffort(body.defaultEffort);
+      for (const key of ['defaultCwd', 'defaultModel', 'defaultPermissionMode', 'defaultEffort']) {
         if (body[key] !== undefined) this.config[key] = body[key];
       }
       saveConfig(this.config);

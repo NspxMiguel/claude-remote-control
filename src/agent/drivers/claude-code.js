@@ -129,6 +129,7 @@ export function createDriver({
   cwd,
   model,
   permissionMode,
+  effort,
   resumeFrom,
   forkSession,
   config,
@@ -143,6 +144,10 @@ export function createDriver({
     cwd,
     model,
     permissionMode,
+    // Silently downgraded by the SDK on models that do not implement the
+    // higher levels, which is the behaviour we want: ask for max, get the most
+    // the chosen model can do.
+    ...(effort ? { effort } : {}),
     includePartialMessages: true,
     abortController: abort,
     canUseTool: (toolName, toolInput, opts) => requestPermission(toolName, toolInput, opts),

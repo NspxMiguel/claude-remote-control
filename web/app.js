@@ -93,6 +93,9 @@ async function pair(secret, name) {
 
   state.token = data.token;
   localStorage.setItem(TOKEN_KEY, data.token);
+  // Remember which Mac this token belongs to, so a second one can be added
+  // without losing the first.
+  rememberMachine({ origin: currentOrigin(), token: data.token, name: data.hostname });
   return data;
 }
 
@@ -129,6 +132,79 @@ function unpair(silent) {
 // ---------------------------------------------------------------------------
 // Knowing where else this Mac lives
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// More than one Mac
+// ---------------------------------------------------------------------------
+
+const MACHINES_KEY = 'crc.machines';
+
+/**
+ * Every Mac this phone has been paired with.
+ *
+ * One is the normal case and goes straight in, exactly as before. The moment
+ * there is a second, the app has to ask which one you meant — a token belongs
+ * to one machine, and silently using the wrong one looks like the app is
+ * broken rather than pointed elsewhere.
+ */
+function knownMachines() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(MACHINES_KEY) || '[]');
+    return Array.isArray(stored) ? stored : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberMachine({ origin, token, name }) {
+  const machines = knownMachines().filter((m) => m.origin !== origin);
+  machines.unshift({ origin, token, name: name || origin, pairedAt: Date.now() });
+  try {
+    localStorage.setItem(MACHINES_KEY, JSON.stringify(machines.slice(0, 8)));
+  } catch {
+    /* private mode — pairing still works, it just is not remembered */
+  }
+}
+
+/**
+ * Move to another Mac, carrying the whole list with you.
+ *
+ * Browser storage is per-origin, so each machine would otherwise remember only
+ * itself and the picker could never show two. The list rides in the fragment —
+ * which never leaves the device, the same place the pairing token already
+ * travels — and the destination merges it.
+ */
+function switchToMachine(machine) {
+  const luggage = btoa(unescape(encodeURIComponent(JSON.stringify(knownMachines()))));
+  location.href = `${machine.origin}/#token=${encodeURIComponent(machine.token)}&machines=${encodeURIComponent(luggage)}`;
+}
+
+/** Merge a list handed over by another origin. Local entries win on conflict. */
+function mergeMachines(encoded) {
+  if (!encoded) return;
+  try {
+    const incoming = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+    if (!Array.isArray(incoming)) return;
+    const mine = knownMachines();
+    const merged = [...mine];
+    for (const machine of incoming) {
+      if (!machine?.origin || !machine?.token) continue;
+      if (merged.some((m) => m.origin === machine.origin)) continue;
+      merged.push(machine);
+    }
+    localStorage.setItem(MACHINES_KEY, JSON.stringify(merged.slice(0, 8)));
+  } catch {
+    /* a mangled fragment is not worth failing a boot over */
+  }
+}
+
+function forgetMachine(origin) {
+  const machines = knownMachines().filter((m) => m.origin !== origin);
+  localStorage.setItem(MACHINES_KEY, JSON.stringify(machines));
+}
+
+/** The Mac this tab is talking to. */
+const currentOrigin = () => `${location.protocol}//${location.host}`;
 
 /**
  * The addresses the daemon last reported, kept on the device.
@@ -262,8 +338,11 @@ let stopCamera = null;
 async function prepareScanner() {
   const scanner = await loadScanner();
   const obstacle = scanner.liveCameraObstacle();
-  $('#scan-note').textContent = obstacle || 'Opens the camera. Hold it over the code on your Mac.';
-  $('#scan-open').textContent = obstacle ? 'Take a photo of the code' : 'Scan the QR code';
+  $('#scan-note').textContent =
+    obstacle || t('gate.scanNote', 'Opens the camera. Hold it over the code on your Mac.');
+  $('#scan-open').textContent = obstacle
+    ? t('gate.photo', 'Take a photo of the code')
+    : t('gate.scan', 'Scan the QR code');
 }
 
 async function handleScan(text) {
@@ -814,7 +893,50 @@ async function refreshSessions() {
   }
 }
 
+/**
+ * The Macs this phone knows, when there is more than one.
+ *
+ * With a single machine nothing is shown — the app goes straight in, which is
+ * the whole point. A second one turns the list on, because a token is bound to
+ * one machine and landing on the wrong one looks like a broken app.
+ */
+function renderMachines() {
+  const container = $('#machines');
+  const machines = knownMachines();
+  const here = currentOrigin();
+
+  container.innerHTML = '';
+  container.hidden = machines.length < 2;
+  if (machines.length < 2) return;
+
+  container.appendChild(el('h2', null, t('app.machines', 'Machines')));
+  for (const machine of machines) {
+    const isHere = machine.origin === here;
+    const row = el('button', `machine-row${isHere ? ' active' : ''}`);
+    row.type = 'button';
+    row.appendChild(el('i', `dot ${isHere ? 'idle' : ''}`));
+    const text = el('div', 'machine-text');
+    text.appendChild(el('strong', null, machine.name || machine.origin));
+    text.appendChild(el('span', null, machine.origin.replace(/^https?:\/\//, '')));
+    row.appendChild(text);
+    if (!isHere) {
+      row.addEventListener('click', () => switchToMachine(machine));
+    }
+    container.appendChild(row);
+  }
+
+  const add = el('button', 'ghost-btn wide', t('app.addMachine', 'Add another Mac'));
+  add.type = 'button';
+  add.addEventListener('click', () => {
+    closeDrawer();
+    toast(t('toast.addMachine', 'Scan the QR code shown on the other Mac.'));
+    $('#scan-open').click();
+  });
+  container.appendChild(add);
+}
+
 function renderSessionList() {
+  renderMachines();
   // Sessions this app drives, versus transcripts it only watches.
   const live = [...state.sessions.values()]
     .filter((s) => s.kind !== 'mirror')
@@ -1957,18 +2079,36 @@ async function openSettings() {
   $('#settings-sheet').hidden = false;
 }
 
-/** Turn a model id into something worth reading: claude-opus-5 → Opus 5. */
-function prettyModel(id) {
+/**
+ * The family name, and nothing else.
+ *
+ * `claude-opus-5`, `claude-3-5-sonnet-20241022`, `opus` — all of them are
+ * "Opus" to a person holding a phone. The version is noise on a 4-inch row and
+ * the id is still one tap away if anyone wants it.
+ */
+const MODEL_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable'];
+
+export function prettyModel(id) {
   if (!id) return null;
-  const known = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
-  if (known[id]) return known[id];
-  return String(id)
-    .replace(/^claude-/, '')
-    .replace(/-\d{8}$/, '')
-    .split('-')
-    .map((part) => (/^\d+(\.\d+)?$/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(' ');
+  const lower = String(id).toLowerCase();
+  const family = MODEL_FAMILIES.find((name) => lower.includes(name));
+  if (family) return family.charAt(0).toUpperCase() + family.slice(1);
+  // Something we do not recognise: show it, tidied, rather than hide it.
+  return String(id).replace(/^claude-/, '').replace(/-\d{8}$/, '');
 }
+
+/**
+ * Mirrors src/effort.js. Not imported across the boundary on purpose: web/ is
+ * served as static files and src/ is not, so an import would 404 in the
+ * browser — and the server keeps its own copy as the validator anyway.
+ */
+const EFFORT_LABELS = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+};
 
 const PERMISSION_LABEL = {
   default: 'Ask me',
@@ -2056,6 +2196,17 @@ function openSessionOptions() {
       controls.card.appendChild(row({ name: 'Model', detail: model || 'default', control: select }));
     }
 
+    const effortSelect = $('#opt-effort');
+    effortSelect.value = session.effort || '';
+    effortSelect.hidden = false;
+    controls.card.appendChild(
+      row({
+        name: t('session.thinking', 'Thinking'),
+        detail: EFFORT_LABELS[session.effort] || t('session.agentDefault', 'Agent default'),
+        control: effortSelect,
+      }),
+    );
+
     const perm = $('#opt-perm');
     perm.value = session.permissionMode || 'default';
     perm.hidden = false;
@@ -2088,14 +2239,68 @@ function openSessionOptions() {
 // Wiring
 // ---------------------------------------------------------------------------
 
+/**
+ * Six boxes that behave like one field.
+ *
+ * Typing moves forward, backspace moves back, and a pasted code fills them all
+ * — the code is read off a screen across the room, so the failure to design
+ * for is looking away and losing your place.
+ */
+function wireCodeBoxes() {
+  const boxes = [...document.querySelectorAll('.code-box')];
+  const value = () => boxes.map((b) => b.value).join('');
+
+  boxes.forEach((box, index) => {
+    box.addEventListener('input', () => {
+      box.value = box.value.replace(/\D/g, '').slice(-1);
+      if (box.value && index < boxes.length - 1) boxes[index + 1].focus();
+      if (value().length === boxes.length) $('#pair-form').requestSubmit();
+    });
+    box.addEventListener('keydown', (event) => {
+      if (event.key === 'Backspace' && !box.value && index > 0) boxes[index - 1].focus();
+    });
+    box.addEventListener('paste', (event) => {
+      const digits = (event.clipboardData?.getData('text') || '').replace(/\D/g, '').slice(0, 6);
+      if (!digits) return;
+      event.preventDefault();
+      digits.split('').forEach((digit, i) => {
+        if (boxes[i]) boxes[i].value = digit;
+      });
+      boxes[Math.min(digits.length, boxes.length - 1)].focus();
+      if (digits.length === boxes.length) $('#pair-form').requestSubmit();
+    });
+  });
+
+  return { value, clear: () => boxes.forEach((b) => (b.value = '')), focus: () => boxes[0]?.focus() };
+}
+
+let codeBoxes = null;
+
 function wireUp() {
   // Pairing
+  codeBoxes = wireCodeBoxes();
   $('#pair-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const errorNode = $('#pair-error');
     errorNode.hidden = true;
+    const code = codeBoxes.value();
+    if (code.length < 6) return;
     try {
-      await pair($('#pair-input').value, $('#pair-name').value);
+      await pair(code, $('#pair-name').value);
+      await enterApp();
+    } catch (err) {
+      errorNode.textContent = err.message;
+      errorNode.hidden = false;
+      codeBoxes.clear();
+      codeBoxes.focus();
+    }
+  });
+
+  $('#pair-token-go').addEventListener('click', async () => {
+    const errorNode = $('#pair-error');
+    errorNode.hidden = true;
+    try {
+      await pair($('#pair-token').value.trim(), $('#pair-name').value);
       await enterApp();
     } catch (err) {
       errorNode.textContent = err.message;
@@ -2297,6 +2502,7 @@ function wireUp() {
           agent: $('#new-agent').value || undefined,
           model: $('#new-model').parentElement.hidden ? undefined : $('#new-model').value,
           permissionMode: $('#new-perm').value,
+          effort: $('#new-effort').value || undefined,
         }),
       });
       state.sessions.set(session.id, session);
@@ -2319,6 +2525,19 @@ function wireUp() {
         body: JSON.stringify({ model: event.target.value }),
       });
       toast(`Model set to ${event.target.value}`);
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $('#opt-effort').addEventListener('change', async (event) => {
+    const session = currentSession();
+    if (!session) return;
+    try {
+      await api(`/api/sessions/${session.id}/effort`, {
+        method: 'POST',
+        body: JSON.stringify({ effort: event.target.value || null }),
+      });
     } catch (err) {
       toast(err.message);
     }
@@ -2552,12 +2771,30 @@ async function main() {
 
   // Changing only the fragment does not reload the page, so links that arrive
   // while the app is already open have to be handled here too.
-  window.addEventListener('hashchange', () => {
+  window.addEventListener('hashchange', async () => {
+    // A pairing link that arrives while the app is already open only changes
+    // the fragment, which does not reload the page — so it has to be handled
+    // here too, or scanning a second Mac's code from inside the app does
+    // nothing at all.
+    const hash = new URLSearchParams(location.hash.slice(1));
+    mergeMachines(hash.get('machines'));
+    const token = hash.get('token');
+    if (token) {
+      history.replaceState(null, '', location.pathname);
+      try {
+        await pair(token, defaultDeviceName());
+        await enterApp({ paired: false });
+        return;
+      } catch (err) {
+        toast(err.message);
+      }
+    }
     if (state.token) openRequestedSession();
   });
 
   // A pairing link drops the token in the fragment; consume it and clean the URL.
   const hash = new URLSearchParams(location.hash.slice(1));
+  mergeMachines(hash.get('machines'));
   const hashToken = hash.get('token');
   let justPaired = false;
   if (hashToken) {

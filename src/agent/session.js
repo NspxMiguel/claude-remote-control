@@ -173,7 +173,7 @@ function friendlyError(text, agent) {
  * a human, so all agents behave identically from the phone's point of view.
  */
 export class Session extends EventEmitter {
-  constructor({ config, id, cwd, model, permissionMode, resumeFrom, forkSession = true, title, driver }) {
+  constructor({ config, id, cwd, model, permissionMode, effort, resumeFrom, forkSession = true, title, driver }) {
     super();
     this.config = config;
     this.id = id || randomUUID();
@@ -184,6 +184,7 @@ export class Session extends EventEmitter {
     // passing "sonnet" to Antigravity is a hard error on its side.
     this.model = model || (this.driverId === DEFAULT_DRIVER ? config.defaultModel : null);
     this.permissionMode = permissionMode || config.defaultPermissionMode;
+    this.effort = effort || config.defaultEffort || null;
     this.resumeFrom = resumeFrom || null;
     this.forkSession = forkSession;
     this.title = title || null;
@@ -217,6 +218,7 @@ export class Session extends EventEmitter {
       cwd: this.cwd,
       model: this.model,
       permissionMode: this.permissionMode,
+      effort: this.effort,
       resumeFrom: this.resumeFrom,
       forkSession: this.forkSession,
       config,
@@ -268,6 +270,7 @@ export class Session extends EventEmitter {
       cwd: this.cwd,
       model: this.model,
       permissionMode: this.permissionMode,
+      effort: this.effort,
       status: this.status,
       claudeSessionId: this.agentSessionId,
       agentSessionId: this.agentSessionId,
@@ -486,6 +489,14 @@ export class Session extends EventEmitter {
     await this.driver.setModel?.(model);
     this.model = model;
     this.feed.append({ kind: 'system', text: `Model switched to ${model}` });
+    this.emit('state', this.toJSON());
+  }
+
+  /** Change how hard it thinks, from the next turn on. */
+  async setEffort(effort) {
+    await this.driver.setEffort?.(effort);
+    this.effort = effort;
+    this.feed.append({ kind: 'system', text: `Effort: ${effort}` });
     this.emit('state', this.toJSON());
   }
 

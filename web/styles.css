@@ -276,7 +276,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
  */
 .gate {
   position: fixed; inset: 0;
-  display: grid; place-items: center;
+  /* An explicit minmax(0, …) column: with plain place-items the column is
+   * sized by the card's max-content, and the six code boxes made that wider
+   * than the phone — the headline and the button ran off the right edge. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
   padding: var(--s6) calc(var(--s6) + var(--safe-left))
            calc(var(--s6) + var(--safe-bottom)) calc(var(--s6) + var(--safe-right));
   background:
@@ -285,7 +291,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   overflow-y: auto;
 }
 .gate-card {
-  width: 100%; max-width: 400px;
+  width: 100%; max-width: 400px; min-width: 0;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   padding: var(--s6) var(--s2);
@@ -1595,3 +1602,105 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 }
 .conn-banner.connecting { color: var(--warn); }
 .conn-banner.down, .conn-banner.offline { color: var(--danger); border-color: var(--danger); }
+
+/* ---- the guided setup, as the design draws it -------------------------------
+ * A step label, a serif line, and six boxes you fill by reading a screen.
+ */
+.step-label {
+  font-size: var(--t-micro);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 var(--s3);
+}
+
+.code-boxes {
+  display: flex;
+  width: 100%;
+  gap: var(--s2);
+  margin: var(--s5) 0 var(--s5);
+}
+.code-box {
+  flex: 1;
+  min-width: 0;
+  height: 66px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 26px;
+  text-align: center;
+  transition: var(--accent-transition);
+}
+.code-box:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.gate-more { margin-top: var(--s5); }
+.gate-more summary {
+  font-size: var(--t-small);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: var(--s2) 0;
+}
+.gate-more summary::marker { color: var(--text-ghost); }
+.gate-more input { margin-top: var(--s2); }
+
+/* The setup checklist: a progress bar that chases, spinners that become checks. */
+.setup-progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-hi);
+  overflow: hidden;
+  margin: var(--s5) 0 var(--s6);
+}
+.setup-progress > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width .7s var(--ease);
+}
+.setup-task {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s4) var(--s1);
+  border-bottom: 1px solid var(--border-soft);
+}
+.setup-task:last-child { border-bottom: none; }
+.setup-mark { width: 26px; height: 26px; flex: none; display: grid; place-items: center; }
+.setup-mark .done {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+  display: grid; place-items: center;
+  animation: pop .4s var(--ease) both;
+}
+.setup-mark .waiting { width: 8px; height: 8px; border-radius: 50%; background: var(--surface-hi); }
+.setup-task-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.setup-task-text strong { font-size: 16px; font-weight: 500; letter-spacing: -.01em; }
+.setup-task-text span { font-size: var(--t-meta); color: var(--text-faint); }
+
+
+/* The machine picker: only ever visible with more than one Mac paired. */
+.machines { display: grid; gap: var(--s2); margin-bottom: var(--s5); }
+.machine-row {
+  display: flex; align-items: center; gap: var(--s3);
+  width: 100%;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  transition: var(--accent-transition);
+}
+.machine-row.active { border-color: var(--accent); }
+.machine-text { display: grid; gap: 1px; min-width: 0; }
+.machine-text strong { font-size: 14px; font-weight: 500; }
+.machine-text span { font-size: var(--t-micro); color: var(--text-faint); }

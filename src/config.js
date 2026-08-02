@@ -54,6 +54,11 @@ const DEFAULTS = {
    * 'bypassPermissions' asks for nothing — dangerous, opt in deliberately.
    */
   defaultPermissionMode: 'default',
+  /**
+   * How hard the agent thinks by default: low | medium | high | xhigh | max.
+   * Null leaves it to the agent, which is what most people want.
+   */
+  defaultEffort: null,
   /** Seconds a permission request waits for a human before it is denied. */
   permissionTimeoutSec: 600,
   /**

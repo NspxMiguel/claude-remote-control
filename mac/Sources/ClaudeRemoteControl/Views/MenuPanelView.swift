@@ -13,7 +13,7 @@ struct MenuPanelView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            AddressSection(isShowingPairing: $isShowingPairing)
+            AddressSection()
             Divider()
             SetupView()
             Divider()
@@ -56,6 +56,19 @@ struct MenuPanelView: View {
                     .foregroundStyle(.red)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                // The first thing anyone opens this panel for is the code to
+                // type into a phone. It was three rows down behind a label.
+                Button("Show pairing code") { isShowingPairing = true }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(addresses.pairingURL == nil)
+                    .help(addresses.pairingURL == nil ? "Start the daemon once to create a token." : "")
+                    .popover(isPresented: $isShowingPairing, arrowEdge: .bottom) {
+                        PairingView(url: addresses.pairingURL)
+                    }
+                Spacer()
             }
 
             HStack(spacing: 8) {
@@ -176,7 +189,6 @@ struct StatusDot: View {
 
 private struct AddressSection: View {
     @ObservedObject private var addresses = AddressModel.shared
-    @Binding var isShowingPairing: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -194,16 +206,6 @@ private struct AddressSection: View {
                 AddressRow(address: address)
             }
 
-            Button("Show pairing code") { isShowingPairing = true }
-                .controlSize(.small)
-                .disabled(addresses.pairingURL == nil)
-                .help(addresses.pairingURL == nil
-                      ? "Start the daemon once to create a pairing token."
-                      : "")
-                .popover(isPresented: $isShowingPairing, arrowEdge: .trailing) {
-                    PairingView(url: addresses.pairingURL)
-                }
-                .padding(.top, 2)
         }
         .padding(12)
     }
