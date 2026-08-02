@@ -26,9 +26,6 @@ jobs:
 
       # The suite runs against a fake Claude Code executable, so it needs no
       # credentials and never reaches the network.
+      # (The suite also checks the committed icons still match the generator,
+      # comparing decoded pixels — zlib bytes differ across platforms.)
       - run: npm test
-
-      - name: Icons are reproducible from source
-        run: |
-          npm run icons
-          git diff --exit-code -- web/icons

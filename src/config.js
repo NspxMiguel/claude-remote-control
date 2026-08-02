@@ -48,6 +48,13 @@ const DEFAULTS = {
   maxFeedItems: 2000,
   /** Cap on concurrent live sessions — each one is a Claude Code process. */
   maxSessions: 8,
+  /**
+   * Tools remote sessions may not use. AskUserQuestion is refused by default:
+   * it expects a client that can render an interactive dialog, and without one
+   * the turn stalls until it times out. Denied, Claude asks in plain text
+   * instead, which a chat client can actually answer.
+   */
+  disallowedTools: ['AskUserQuestion'],
 };
 
 function ensureDir() {

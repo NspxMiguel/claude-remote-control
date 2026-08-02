@@ -41,7 +41,7 @@ function chunk(type, data) {
   return Buffer.concat([length, body, crc]);
 }
 
-function encodePng(width, height, rgba) {
+export function encodePng(width, height, rgba) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
@@ -93,7 +93,7 @@ function distToRoundRect(px, py, size, radius) {
 
 const mix = (a, b, t) => a + (b - a) * t;
 
-function drawIcon(size, { maskable = false } = {}) {
+export function drawIcon(size, { maskable = false } = {}) {
   const rgba = Buffer.alloc(size * size * 4);
   const scale = size / 512;
 
@@ -144,14 +144,21 @@ function drawIcon(size, { maskable = false } = {}) {
   return encodePng(size, size, rgba);
 }
 
-fs.mkdirSync(OUT_DIR, { recursive: true });
-const targets = [
-  ['icon-192.png', drawIcon(192)],
-  ['icon-512.png', drawIcon(512)],
-  ['icon-maskable-512.png', drawIcon(512, { maskable: true })],
+/** The icon set, as (filename, size, options) — shared with the tests. */
+export const ICONS = [
+  ['icon-192.png', 192, {}],
+  ['icon-512.png', 512, {}],
+  ['icon-maskable-512.png', 512, { maskable: true }],
 ];
 
-for (const [name, buffer] of targets) {
-  fs.writeFileSync(path.join(OUT_DIR, name), buffer);
-  console.log(`wrote ${name} (${(buffer.length / 1024).toFixed(1)} KB)`);
+export const iconPath = (name) => path.join(OUT_DIR, name);
+
+// Only write files when run directly, so tests can import the drawing code.
+if (process.argv[1] && fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1])) {
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+  for (const [name, size, options] of ICONS) {
+    const buffer = drawIcon(size, options);
+    fs.writeFileSync(iconPath(name), buffer);
+    console.log(`wrote ${name} (${(buffer.length / 1024).toFixed(1)} KB)`);
+  }
 }

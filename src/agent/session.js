@@ -24,6 +24,8 @@ const HOST_SESSION_ENV = [
   'CLAUDE_EFFORT',
   'AI_AGENT',
   'BAGGAGE',
+  // Enables a dialog-based tool this client cannot render.
+  'CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL',
 ];
 
 function sanitizedEnv() {
