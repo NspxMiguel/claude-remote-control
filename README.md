@@ -25,8 +25,9 @@ commands, and ask your permission before it does.
   `CLAUDE.md`, settings, MCP servers and skills your desktop uses.
 - **Watch what it's doing.** Tool calls render as cards — the command it ran,
   the diff it wrote, the output it got — instead of a wall of text.
-- **Approve permissions remotely.** When Claude wants to run something, your
-  phone buzzes. Allow once, always allow, or deny — from the couch.
+- **Approve permissions remotely.** When Claude wants to run something, the
+  request lands on your phone with a chime. Allow once, always allow, or deny —
+  from the couch.
 - **Send photos and screenshots.** Attach from the camera or gallery (or paste
   one on desktop); images are resized in the browser before they're sent.
 - **See your desktop sessions.** Conversations started in Claude Desktop or the
