@@ -11,7 +11,7 @@ const HELP = `
 ${bold('claude-remote-control')} — drive Claude Code from your phone
 
   ${cyan('crc start')}              Start the daemon (default command)
-  ${cyan('crc doctor')}             Check everything the daemon needs
+  ${cyan('crc doctor')} [--json]    Check everything the daemon needs
   ${cyan('crc pair')}               Print a pairing QR code for a new device
   ${cyan('crc status')}             Show config, addresses and Tailscale state
   ${cyan('crc token')} [--rotate]   Show or rotate the master token
@@ -140,6 +140,19 @@ async function cmdDoctor(args) {
 
   const { runDoctor } = await import('../src/doctor.js');
   const { results, healthy } = await runDoctor(config);
+
+  // The macOS menu-bar app reads this. `fix` is always present so a client can
+  // key off its nullness instead of guessing from the level.
+  if (args.flags.json) {
+    const checks = results.map(({ level, label, detail, fix }) => ({
+      level,
+      label,
+      detail,
+      fix: fix || null,
+    }));
+    console.log(JSON.stringify({ healthy, checks }, null, 2));
+    return healthy;
+  }
 
   console.log();
   for (const result of results) {

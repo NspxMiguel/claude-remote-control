@@ -54,7 +54,7 @@
         </svg>
         <strong>Remote Control</strong>
       </div>
-      <button id="drawer-close" class="icon-btn" aria-label="Close menu">✕</button>
+      <button id="drawer-close" class="icon-btn" aria-label="Close menu" data-icon="close"></button>
     </header>
 
     <button id="new-session" class="new-session">
@@ -155,7 +155,7 @@
   <div class="sheet-card">
     <header class="sheet-head">
       <h3>New session</h3>
-      <button class="icon-btn sheet-close" aria-label="Close">✕</button>
+      <button class="icon-btn sheet-close" aria-label="Close" data-icon="close"></button>
     </header>
     <label for="new-agent">Agent</label>
     <select id="new-agent"></select>
@@ -194,7 +194,7 @@
   <div class="sheet-card">
     <header class="sheet-head">
       <h3>Session</h3>
-      <button class="icon-btn sheet-close" aria-label="Close">✕</button>
+      <button class="icon-btn sheet-close" aria-label="Close" data-icon="close"></button>
     </header>
     <div id="opts-info" class="kv"></div>
     <label for="opt-model">Model</label>
@@ -218,8 +218,9 @@
   <div class="sheet-card">
     <header class="sheet-head">
       <h3>Settings</h3>
-      <button class="icon-btn sheet-close" aria-label="Close">✕</button>
+      <button class="icon-btn sheet-close" aria-label="Close" data-icon="close"></button>
     </header>
+    <div id="setup-body"></div>
     <div id="settings-body"></div>
     <div id="agents-body"></div>
     <button id="pair-another" class="ghost-btn wide">Pair another device</button>

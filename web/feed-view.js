@@ -5,20 +5,8 @@
  */
 
 import { el } from './dom.js';
+import { icon, toolIcon } from './icons.js';
 import { renderMarkdown } from './markdown.js';
-
-const TOOL_GLYPH = {
-  Bash: '›_',
-  Read: '◇',
-  Write: '✎',
-  Edit: '✎',
-  Glob: '⌕',
-  Grep: '⌕',
-  WebFetch: '↗',
-  WebSearch: '⌕',
-  Task: '⚙',
-  Agent: '⚙',
-};
 
 
 
@@ -199,15 +187,30 @@ export function refreshGroup(group) {
 export function renderItem(item) {
   switch (item.kind) {
     case 'user': {
-      const bubble = el('div', 'item bubble-user', item.text || '');
-      if (item.attachments) {
-        const chip = el(
-          'div',
-          'bubble-attach',
-          `🖼 ${item.attachments} image${item.attachments === 1 ? '' : 's'}`,
+      const bubble = el('div', 'item bubble-user');
+      // Show what was sent, not a count of it. Tapping opens it full size.
+      if (item.thumbnails?.length) {
+        const strip = el('div', 'bubble-images');
+        for (const src of item.thumbnails) {
+          const link = document.createElement('a');
+          link.href = src;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          const img = document.createElement('img');
+          img.src = src;
+          img.alt = 'Attached image';
+          img.loading = 'lazy';
+          link.appendChild(img);
+          strip.appendChild(link);
+        }
+        bubble.appendChild(strip);
+      } else if (item.attachments) {
+        // An older transcript, from before previews were kept.
+        bubble.appendChild(
+          el('div', 'bubble-attach', `${item.attachments} image${item.attachments === 1 ? '' : 's'} attached`),
         );
-        bubble.prepend(chip);
       }
+      if (item.text) bubble.appendChild(el('div', 'bubble-text', item.text));
       return withMeta(bubble, item);
     }
 
@@ -337,21 +340,26 @@ export function renderTool(item) {
 
   const head = el('button', 'tool-head');
   head.type = 'button';
-  const glyph = el('span', 'tool-icon', TOOL_GLYPH[item.name] || '•');
+  const glyph = el('span', 'tool-icon');
+  glyph.appendChild(toolIcon(item.name));
   const textWrap = el('div', 'tool-text');
   textWrap.appendChild(el('div', 'tool-title', item.title || item.name));
   if (item.subtitle) textWrap.appendChild(el('div', 'tool-sub', item.subtitle));
 
+  const STATUS_ICON = { done: 'check' };
   const statusLabel = {
     building: '…',
     pending: 'queued',
     running: 'running',
-    done: '✓',
+    done: '',
     error: 'failed',
     denied: 'denied',
   }[item.status] || '';
 
-  head.append(glyph, textWrap, el('span', 'tool-status', statusLabel));
+  const status = el('span', 'tool-status');
+  if (STATUS_ICON[item.status]) status.appendChild(icon(STATUS_ICON[item.status], { size: 14 }));
+  else status.textContent = statusLabel;
+  head.append(glyph, textWrap, status);
   card.appendChild(head);
 
   const body = el('div', 'tool-body');

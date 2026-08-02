@@ -10,6 +10,8 @@ const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'im
 const MAX_IMAGES = 4;
 /** Base64 of roughly 3.7 MB of image data — comfortably above a resized photo. */
 const MAX_IMAGE_CHARS = 5 * 1024 * 1024;
+/** A 240px JPEG preview is a few KB; anything near this is not a thumbnail. */
+const MAX_THUMBNAIL_CHARS = 120 * 1024;
 
 /** Reject anything that is not a plausible, in-budget image before it reaches the agent. */
 function validateImages(images) {
@@ -33,7 +35,16 @@ function validateImages(images) {
     if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
       throw Object.assign(new Error('Image data is not valid base64.'), { status: 400 });
     }
-    return { mediaType, data };
+    // A small data: URL preview, kept for the transcript. Bounded so a client
+    // cannot smuggle a full-size image into the replayed feed.
+    const thumbnail =
+      typeof image.thumbnail === 'string' &&
+      image.thumbnail.startsWith('data:image/') &&
+      image.thumbnail.length <= MAX_THUMBNAIL_CHARS
+        ? image.thumbnail
+        : null;
+
+    return { mediaType, data, thumbnail };
   });
 }
 
@@ -363,9 +374,14 @@ export class Session extends EventEmitter {
       forDriver = [];
     }
 
-    // The feed keeps a note of attachments, not the bytes: it is replayed in
-    // full on every reconnect, and megabytes of base64 would make that painful.
-    this.feed.append({ kind: 'user', text, attachments: attachments.length || undefined });
+    // The transcript carries thumbnails, never the full-size bytes: it is
+    // replayed in full on every reconnect.
+    this.feed.append({
+      kind: 'user',
+      text,
+      attachments: attachments.length || undefined,
+      thumbnails: attachments.map((a) => a.thumbnail).filter(Boolean),
+    });
     this.driver.send(prompt, forDriver);
     this.setStatus('busy');
     return true;

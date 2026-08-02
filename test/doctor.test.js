@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import test, { after, describe } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crc-doctor-')));
 const PROJECTS = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crc-dprojects-')));
@@ -101,5 +105,61 @@ describe('doctor', () => {
   test('Tailscale being absent never blocks startup', async () => {
     const { results } = await runDoctor(baseConfig());
     assert.notEqual(find(results, 'Tailscale').level, 'bad', 'Tailscale is optional');
+  });
+});
+
+const exec = promisify(execFile);
+const CLI = fileURLToPath(new URL('../bin/crc.js', import.meta.url));
+
+/** `crc doctor` exits 1 when unhealthy, which is not a test failure. */
+async function runCli(flags) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crc-doctor-cli-'));
+  // Port 0 on the loopback: the port check gets a real bind without racing a
+  // daemon the developer happens to have running on 8787.
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ host: '127.0.0.1', port: 0 }));
+  try {
+    return await exec(process.execPath, [CLI, 'doctor', ...flags], {
+      env: { ...process.env, CRC_CONFIG_DIR: dir, CRC_PROJECTS_DIR: PROJECTS },
+    });
+  } catch (err) {
+    return { stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe('doctor --json', () => {
+  test('prints JSON and nothing else', async () => {
+    const { stdout } = await runCli(['--json']);
+    const report = JSON.parse(stdout);
+
+    assert.equal(typeof report.healthy, 'boolean');
+    assert.ok(Array.isArray(report.checks));
+    assert.deepEqual(
+      report.checks.map((c) => c.label).sort(),
+      ['Allowed roots', 'Claude Code', 'Credentials', 'Desktop sessions', 'Node.js', 'Port', 'Tailscale'],
+    );
+  });
+
+  test('every check carries a level, a detail and a fix slot', async () => {
+    const { stdout } = await runCli(['--json']);
+    const { checks, healthy } = JSON.parse(stdout);
+
+    for (const check of checks) {
+      assert.ok(['ok', 'warn', 'bad'].includes(check.level), `bad level on ${check.label}`);
+      assert.equal(typeof check.detail, 'string');
+      assert.ok(check.detail.length, `${check.label} has no detail`);
+      // Null rather than absent, so a typed client can decode it unconditionally.
+      assert.ok(check.fix === null || typeof check.fix === 'string');
+      if (check.level !== 'ok') assert.ok(check.fix, `${check.label} offers no fix`);
+    }
+    assert.equal(healthy, checks.every((c) => c.level !== 'bad'));
+  });
+
+  test('leaves the human output alone', async () => {
+    const { stdout } = await runCli([]);
+    assert.match(stdout, /Node\.js/);
+    assert.match(stdout, /[✓!✗]/);
+    assert.throws(() => JSON.parse(stdout), 'the table is not JSON');
   });
 });

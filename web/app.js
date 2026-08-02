@@ -1,6 +1,7 @@
 /* Claude Remote Control — PWA client. No framework, no build step. */
 
 import { el, $ } from './dom.js';
+import { icon } from './icons.js';
 import { renderMarkdown } from './markdown.js';
 import {
   carryOverOpenState,
@@ -30,6 +31,8 @@ const state = {
 
 /** Anthropic recommends no side longer than this; bigger just wastes bandwidth. */
 const MAX_IMAGE_EDGE = 1568;
+/** Small enough to live in the transcript, big enough to recognise. */
+const THUMBNAIL_EDGE = 240;
 const MAX_ATTACHMENTS = 4;
 
 // ---------------------------------------------------------------------------
@@ -313,10 +316,21 @@ function shrinkImage(file) {
       const asPng = file.type === 'image/png' && width * height <= 1200 * 1200;
       const mediaType = asPng ? 'image/png' : 'image/jpeg';
       const dataUrl = canvas.toDataURL(mediaType, 0.82);
+
+      // A separate thumbnail goes into the transcript so the sent image is
+      // still visible later. The full-size base64 never does: the feed is
+      // replayed in full on every reconnect.
+      const thumbScale = Math.min(1, THUMBNAIL_EDGE / Math.max(width, height));
+      const thumb = document.createElement('canvas');
+      thumb.width = Math.max(1, Math.round(width * thumbScale));
+      thumb.height = Math.max(1, Math.round(height * thumbScale));
+      thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height);
+
       resolve({
         mediaType,
         data: dataUrl.slice(dataUrl.indexOf(',') + 1),
         url: dataUrl,
+        thumbnail: thumb.toDataURL('image/jpeg', 0.55),
         name: file.name || 'image',
       });
     };
@@ -362,7 +376,8 @@ function renderAttachments() {
     thumb.alt = image.name;
     chip.appendChild(thumb);
 
-    const remove = el('button', 'attachment-remove', '✕');
+    const remove = el('button', 'attachment-remove');
+    remove.appendChild(icon('close', { size: 12 }));
     remove.type = 'button';
     remove.setAttribute('aria-label', `Remove ${image.name}`);
     remove.addEventListener('click', () => {
@@ -516,6 +531,7 @@ function currentSession() {
 function renderHeader() {
   const session = currentSession();
   if (!session) {
+    $('#app').dataset.agent = '';
     $('#session-title').textContent = 'No session';
     $('#session-sub').textContent = '';
     $('#composer-meta').innerHTML = '';
@@ -523,6 +539,8 @@ function renderHeader() {
     return;
   }
 
+  // Recolour the whole app for the agent in this session.
+  $('#app').dataset.agent = session.agent || (session.kind === 'mirror' ? 'claude-code' : '');
   $('#session-title').textContent = session.title || 'Session';
   const bits = [];
   if (session.cwd) bits.push(session.cwd.replace(/^\/Users\/[^/]+/, '~'));
@@ -542,12 +560,12 @@ function renderHeader() {
     meta.appendChild(el('span', null, 'Mirroring a desktop session — open “Take over” to continue it here.'));
   } else if (busy) {
     meta.appendChild(el('span', 'spinner'));
-    meta.appendChild(el('span', null, 'Claude is working…'));
+    meta.appendChild(el('span', null, `${session.agentLabel || 'Claude'} is working…`));
   } else if (typeof session.totalCostUsd === 'number' && session.totalCostUsd > 0) {
     meta.appendChild(el('span', null, `$${session.totalCostUsd.toFixed(4)} this session`));
   }
 
-  setComposerEnabled(!session.readOnly);
+  setComposerEnabled(!session.readOnly, undefined, session.agentLabel);
   updateTabTitle();
 }
 
@@ -562,10 +580,10 @@ function updateTabTitle() {
   else document.title = `Claude Remote Control${name}`;
 }
 
-function setComposerEnabled(enabled, disabledHint = 'Read-only mirror') {
+function setComposerEnabled(enabled, disabledHint = 'Read-only mirror', agentLabel) {
   $('#input').disabled = !enabled;
   $('#send').disabled = !enabled;
-  $('#input').placeholder = enabled ? 'Message Claude…' : disabledHint;
+  $('#input').placeholder = enabled ? `Message ${agentLabel || 'Claude'}…` : disabledHint;
 }
 
 // ---------------------------------------------------------------------------
@@ -871,9 +889,129 @@ async function openPicker(startPath) {
   await load(startPath);
 }
 
+/**
+ * The host-side setup, done from here. Everything in this section is something
+ * you would otherwise have to walk to the machine and type.
+ */
+async function renderSetup() {
+  const container = $('#setup-body');
+  container.innerHTML = '';
+
+  let data;
+  try {
+    data = await api('/api/setup');
+  } catch (err) {
+    container.appendChild(el('p', 'error', err.message));
+    return;
+  }
+
+  container.appendChild(el('label', null, 'This Mac'));
+
+  for (const task of data.tasks) {
+    const row = el('div', 'agent-row');
+    const head = el('div', 'agent-head');
+    head.appendChild(el('i', `dot ${task.done ? 'idle' : 'error'}`));
+    head.appendChild(el('span', 'agent-name', task.label));
+    head.appendChild(el('span', 'agent-state', task.detail || (task.done ? 'ready' : 'missing')));
+    row.appendChild(head);
+
+    if (!task.done) {
+      row.appendChild(el('p', 'small muted', task.manualHint || task.detail));
+
+      if (task.runnable) {
+        const run = el('button', 'ghost-btn wide', `Install ${task.label}`);
+        run.type = 'button';
+        run.addEventListener('click', async () => {
+          run.disabled = true;
+          run.textContent = 'Working…';
+          try {
+            await api(`/api/setup/${task.id}`, { method: 'POST' });
+            toast(`${task.label} ready`);
+            openSettings();
+          } catch (err) {
+            toast(err.message);
+            run.disabled = false;
+            run.textContent = `Install ${task.label}`;
+          }
+        });
+        row.appendChild(run);
+      } else if (task.manual) {
+        const command = el('div', 'setup-command');
+        command.appendChild(el('code', null, task.manual));
+        const copy = el('button', 'link-btn', 'Copy');
+        copy.type = 'button';
+        copy.addEventListener('click', async () => {
+          copy.textContent = (await copyText(task.manual)) ? 'Copied' : 'Failed';
+          setTimeout(() => {
+            copy.textContent = 'Copy';
+          }, 1600);
+        });
+        command.appendChild(copy);
+        row.appendChild(command);
+      }
+    }
+    container.appendChild(row);
+  }
+
+  // Keep awake — what people install Amphetamine for.
+  if (data.keepAwake?.supported) {
+    const row = el('div', 'agent-row');
+    const head = el('div', 'agent-head');
+    head.appendChild(el('i', `dot ${data.keepAwake.active ? 'idle' : ''}`));
+    head.appendChild(el('span', 'agent-name', 'Keep this Mac awake'));
+
+    const toggle = el('button', 'link-btn', data.keepAwake.active ? 'Turn off' : 'Turn on');
+    toggle.type = 'button';
+    toggle.addEventListener('click', async () => {
+      try {
+        await api('/api/setup/keep-awake', {
+          method: 'PUT',
+          body: JSON.stringify({ enabled: !data.keepAwake.active }),
+        });
+        renderSetup();
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+    head.appendChild(toggle);
+    row.appendChild(head);
+    row.appendChild(el('p', 'small muted', data.keepAwake.description));
+    container.appendChild(row);
+  }
+
+  // Project folder — where new sessions start.
+  const folder = el('div', 'agent-row');
+  const folderHead = el('div', 'agent-head');
+  folderHead.appendChild(el('span', 'agent-name', 'Project folder'));
+  folder.appendChild(folderHead);
+  folder.appendChild(el('p', 'small muted', prettyPath(data.defaultCwd)));
+
+  const options = el('div', 'root-options');
+  for (const root of data.suggestedRoots) {
+    const choice = el('button', `root-choice${root === data.defaultCwd ? ' active' : ''}`, prettyPath(root));
+    choice.type = 'button';
+    choice.addEventListener('click', async () => {
+      try {
+        await api('/api/setup/default-cwd', { method: 'PUT', body: JSON.stringify({ path: root }) });
+        state.serverState = await api('/api/state');
+        toast('Project folder set');
+        renderSetup();
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+    options.appendChild(choice);
+  }
+  folder.appendChild(options);
+  container.appendChild(folder);
+}
+
+const prettyPath = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~');
+
 async function openSettings() {
   const body = $('#settings-body');
   body.innerHTML = '';
+  renderSetup();
   try {
     const data = await api('/api/state');
     state.serverState = data;
@@ -1051,7 +1189,7 @@ function wireUp() {
       return;
     }
 
-    const images = state.pending.map(({ mediaType, data }) => ({ mediaType, data }));
+    const images = state.pending.map(({ mediaType, data, thumbnail }) => ({ mediaType, data, thumbnail }));
     if (!send({ t: 'prompt', sessionId: state.currentId, text, images })) {
       toast('Not connected — reconnecting…');
       return;
@@ -1309,6 +1447,11 @@ async function openRequestedSession() {
 }
 
 async function main() {
+  // Buttons declare their icon in markup; fill them in with real shapes.
+  for (const node of document.querySelectorAll('[data-icon]')) {
+    node.appendChild(icon(node.dataset.icon, { size: 18 }));
+  }
+
   wireUp();
 
   // Changing only the fragment does not reload the page, so links that arrive

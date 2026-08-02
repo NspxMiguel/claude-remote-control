@@ -16,6 +16,7 @@
   --accent-dim: #a8593a;
   /* Text drawn on top of --accent; flips with the theme to stay readable. */
   --on-accent: #17110d;
+  --accent-transition: background-color .25s ease, color .25s ease, border-color .25s ease;
   --ok: #6fbf8b;
   --warn: #e0b95f;
   --danger: #e0685f;
@@ -50,6 +51,22 @@
     --thinking: #6b5bc4;
   }
 }
+
+/**
+ * The accent follows whichever agent you are talking to, so it is obvious at a
+ * glance whose session you are in. Each is that product's own colour.
+ */
+.app[data-agent="claude-code"] { --accent: #e0855f; --accent-dim: #a8593a; --on-accent: #17110d; }
+.app[data-agent="antigravity"] { --accent: #7aa5f0; --accent-dim: #4a6fae; --on-accent: #0c1220; }
+.app[data-agent="acp"]         { --accent: #b98ce6; --accent-dim: #7f5aa8; --on-accent: #140d1c; }
+
+@media (prefers-color-scheme: light) {
+  .app[data-agent="claude-code"] { --accent: #c0623a; --on-accent: #fff; }
+  .app[data-agent="antigravity"] { --accent: #3f6bb8; --on-accent: #fff; }
+  .app[data-agent="acp"]         { --accent: #7a4fb0; --on-accent: #fff; }
+}
+
+.bubble-user, .send, .primary, .brand-mark, .new-session { transition: var(--accent-transition); }
 
 * { box-sizing: border-box; }
 
@@ -594,6 +611,24 @@ input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accen
   opacity: .78;
   margin-bottom: 4px;
 }
+.bubble-images {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 8px;
+}
+.bubble-images a {
+  display: block;
+  line-height: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, .16);
+}
+.bubble-images img {
+  display: block;
+  max-width: 190px;
+  max-height: 190px;
+  object-fit: cover;
+}
+.bubble-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .composer-row { display: flex; gap: 8px; align-items: flex-end; }
 .composer textarea {
@@ -755,6 +790,37 @@ input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accen
   font-size: 13px;
   font-weight: 600;
   padding: 8px 4px;
+}
+
+.setup-command {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+.setup-command code {
+  flex: 1; min-width: 0;
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.root-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.root-choice {
+  font-size: 12.5px;
+  padding: 6px 11px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface-hi);
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+.root-choice.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .device-row {

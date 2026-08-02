@@ -456,6 +456,50 @@ export class RemoteControlServer {
     }
 
     // --- device management (master token only) --------------------------------------
+    // --- setup tasks ------------------------------------------------------------------
+    if (route === 'setup' && method === 'GET') {
+      const { checkTasks, keepAwake, suggestedRoots } = await import('./setup.js');
+      json(res, 200, {
+        tasks: await checkTasks(),
+        keepAwake: keepAwake.toJSON(),
+        suggestedRoots: suggestedRoots(),
+        defaultCwd: this.config.defaultCwd,
+        allowedRoots: this.config.allowedRoots,
+      });
+      return;
+    }
+
+    const setupMatch = route.match(/^setup\/([^/]+)$/);
+    if (setupMatch && method === 'POST') {
+      const { runTask } = await import('./setup.js');
+      json(res, 200, { task: await runTask(setupMatch[1]) });
+      return;
+    }
+
+    if (route === 'setup/keep-awake' && method === 'PUT') {
+      const body = await readJsonBody(req);
+      const { keepAwake } = await import('./setup.js');
+      if (body.enabled) keepAwake.enable();
+      else keepAwake.disable();
+      json(res, 200, { keepAwake: keepAwake.toJSON() });
+      return;
+    }
+
+    if (route === 'setup/default-cwd' && method === 'PUT') {
+      const body = await readJsonBody(req);
+      const target = realPath(body.path || '');
+      if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
+        throw Object.assign(new Error(`Not a directory: ${target}`), { status: 400 });
+      }
+      // Choosing a project folder outside the allowed roots should widen them,
+      // not fail — the point of the setting is to say "work here".
+      if (!isPathAllowed(this.config, target)) this.config.allowedRoots.push(target);
+      this.config.defaultCwd = target;
+      saveConfig(this.config);
+      json(res, 200, { defaultCwd: target, allowedRoots: this.config.allowedRoots });
+      return;
+    }
+
     // --- agent credentials ----------------------------------------------------------
     const credentialMatch = route.match(/^agents\/([^/]+)\/credentials$/);
     if (credentialMatch) {
