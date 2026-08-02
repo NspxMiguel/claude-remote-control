@@ -1,5 +1,5 @@
 cask "claude-remote-control" do
-  version "0.2.0"
+  version "0.3.0"
   sha256 "919c4365bf75b5213367382013ab8872969e91b89831af2b8894ee7fae2d14fd"
 
   # Downloads the SOURCE (not a prebuilt binary) and compiles it on the
