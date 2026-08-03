@@ -30,6 +30,18 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     func install() {
         guard statusItem == nil else { return }
 
+        // Ask for a slot before creating the item. Left to itself on a full
+        // menu bar, macOS puts the icon behind the notch — drawn, never
+        // visible, never clickable. A seeded preferred position lands it in
+        // the region right of the notch instead, which is the whole
+        // difference between an app you can see and one that looks dead.
+        // Only when there is none: dragging the icon writes this key, and
+        // that choice is yours.
+        let positionKey = "NSStatusItem Preferred Position crc.menubar"
+        if UserDefaults.standard.object(forKey: positionKey) == nil {
+            UserDefaults.standard.set(0, forKey: positionKey)
+        }
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         // Named so macOS remembers the slot it was given. Without this the
         // item is anonymous and gets re-placed from scratch on every launch,
