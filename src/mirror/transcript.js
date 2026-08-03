@@ -29,6 +29,18 @@ export function applyTranscriptLine(feed, line) {
   switch (line.type) {
     case 'user': {
       if (line.isSidechain) return meta; // subagent chatter, not the main thread
+
+      // Claude Code writes its own notices as user-role lines flagged isMeta —
+      // "[Image: original 3024x1964, displayed at …]", the local-command
+      // caveat, "Continue from where you left off." Rendering those as user
+      // turns puts words in your mouth: they show up in the accent bubble as
+      // if you had typed them. A prompt the SDK injected is a real turn, and
+      // those carry promptSource, so they still come through.
+      if (line.isMeta && !line.promptSource) {
+        if (line.timestamp) meta.lastActivityAt = Date.parse(line.timestamp);
+        return meta;
+      }
+
       const content = line.message?.content;
 
       // A user line carrying tool_result blocks is a tool completing, not a human typing.
@@ -118,7 +130,7 @@ export function applyTranscriptLine(feed, line) {
  * Some tool results only exist in the `toolUseResult` sidecar field. Fold those
  * into a shape `Feed.handleToolResults` understands.
  */
-export function foldToolResult(feed, line) {
+export function foldToolResult(feed, line, { onImage } = {}) {
   if (!line.toolUseResult) return;
   const content = line.message?.content;
   if (!Array.isArray(content)) return;
@@ -127,14 +139,41 @@ export function foldToolResult(feed, line) {
     const item = feed.toolIndex.get(block.tool_use_id);
     if (!item) continue;
     const { text, isError, truncated } = normalizeToolResult(line.toolUseResult);
+    // An image the agent read is in the transcript as base64. It is far too
+    // big to travel in a feed patch, so the caller keeps the bytes and hands
+    // back an address to fetch them from.
+    const picture = onImage && imageFromLine(line);
     feed.update(item, {
       status: isError ? 'error' : 'done',
       result: text,
       resultTruncated: truncated,
+      ...(picture ? { imageUrl: onImage(block.tool_use_id, picture) } : {}),
       // structuredPatch lives here, so this is the exact diffstat.
       diff: diffStat(item.name, item.input, line.toolUseResult),
     });
   }
+}
+
+/**
+ * The picture behind an image tool result, if there is one.
+ *
+ * Claude Code stores it twice — once as an API-shaped content block and once
+ * in the sidecar. The sidecar is checked first because it also carries the
+ * media type without digging.
+ */
+export function imageFromLine(line) {
+  const file = line.toolUseResult?.type === 'image' ? line.toolUseResult.file : null;
+  if (file?.base64) return { mediaType: file.type || 'image/png', base64: file.base64 };
+
+  for (const block of line.message?.content || []) {
+    for (const inner of block?.content || []) {
+      const source = inner?.type === 'image' ? inner.source : null;
+      if (source?.type === 'base64' && source.data) {
+        return { mediaType: source.media_type || 'image/png', base64: source.data };
+      }
+    }
+  }
+  return null;
 }
 
 /** Split a raw chunk into parsed JSON lines, returning any trailing partial line. */

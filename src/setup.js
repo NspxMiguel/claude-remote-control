@@ -290,19 +290,26 @@ export const closedLid = {
   },
 
   /** Push the flag to whatever the current intent and power source imply. */
-  async apply() {
-    const target = this.wanted && (await onACPower());
+  async apply({ force = false } = {}) {
+    const target = Boolean(this.wanted && (await onACPower()));
+    // Re-asserting a flag that already holds the value costs two processes
+    // every thirty seconds, all day, to change nothing. The periodic re-check
+    // still forces it now and then, so an external change is corrected rather
+    // than trusted forever.
+    if (!force && target === this.inForce) return target;
     try {
       await exec(`sudo -n ${PMSET} -a disablesleep ${target ? 1 : 0}`, {
         env: shellEnv(),
         timeout: 8000,
       });
     } catch {
+      this.inForce = null;
       throw Object.assign(
         new Error('This Mac has not granted permission for closed-lid mode yet.'),
         { status: 403 },
       );
     }
+    this.inForce = target;
     return target;
   },
 
@@ -313,7 +320,7 @@ export const closedLid = {
     const previous = this.wanted;
     this.wanted = Boolean(enabled);
     try {
-      const inForce = await this.apply();
+      const inForce = await this.apply({ force: true });
       log.info(`closed-lid mode ${this.wanted ? 'armed' : 'off'}${inForce ? ' (in force)' : ''}`);
     } catch (err) {
       this.wanted = previous; // the switch stays where it was if pmset refused
@@ -325,8 +332,12 @@ export const closedLid = {
     clearInterval(this.timer);
     this.timer = null;
     if (this.wanted) {
+      let ticks = 0;
       this.timer = setInterval(() => {
-        this.apply().catch((err) => log.warn(`closed-lid re-check failed: ${err?.message}`));
+        // Normally a no-op unless the power source changed; every tenth pass
+        // writes the flag regardless, in case something else moved it.
+        const force = ++ticks % 10 === 0;
+        this.apply({ force }).catch((err) => log.warn(`closed-lid re-check failed: ${err?.message}`));
       }, POWER_POLL_MS);
       this.timer.unref?.();
     }
@@ -341,6 +352,7 @@ export const closedLid = {
   async shutdown() {
     clearInterval(this.timer);
     this.timer = null;
+    this.inForce = null;
     if (!this.wanted) return false;
     this.wanted = false;
     try {

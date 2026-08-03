@@ -433,11 +433,20 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .session-item:hover  { background: var(--surface); }
 .session-item:active { background: var(--surface-hi); }
 .session-item.active { background: var(--surface); box-shadow: none; }
-.session-item .row { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.session-item .row { display: flex; align-items: flex-start; gap: var(--s3); min-width: 0; }
+/* The dot sits on the first line of a title that may run to two. */
+.session-item .row > .dot { margin-top: 7px; }
 .session-item .name {
   flex: 1; min-width: 0;
   font-size: var(--t-ui); font-weight: 500; letter-spacing: -.01em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.35;
+  /* Two lines, then ellipsis. One line clipped every title to "Claude Re…". */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 .session-item .meta {
   font-size: var(--t-meta); color: var(--text-faint);
@@ -459,7 +468,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
   color: var(--text-faint); border: 1px solid var(--border);
   padding: 2px 6px; border-radius: 5px; flex: none;
+  margin-top: 2px;
 }
+/* The one tag still worth the width it costs on the title row. */
+.origin-tag.urgent { color: var(--warn); border-color: var(--warn); }
 
 .drawer-foot {
   border-top: none;
@@ -1794,3 +1806,18 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .machine-text { display: grid; gap: 1px; min-width: 0; }
 .machine-text strong { font-size: 14px; font-weight: 500; }
 .machine-text span { font-size: var(--t-micro); color: var(--text-faint); }
+
+/* A picture the agent read, inside its tool card. */
+.tool-image {
+  margin-top: var(--s3);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+.tool-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 60vh;
+  object-fit: contain;
+}

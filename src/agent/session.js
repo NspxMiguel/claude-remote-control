@@ -203,9 +203,13 @@ export class Session extends EventEmitter {
     /** requestId -> { resolve, timer, item, payload } */
     this.pendingPermissions = new Map();
 
+    /** Set while history is being replayed into the feed; see seedFrom. */
+    this.replaying = false;
     this.feed = new Feed({
       maxItems: config.maxFeedItems,
-      onPatch: (patch) => this.emit('patch', patch),
+      onPatch: (patch) => {
+        if (!this.replaying) this.emit('patch', patch);
+      },
     });
 
     const module = getDriver(this.driverId);

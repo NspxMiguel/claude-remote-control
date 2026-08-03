@@ -79,10 +79,11 @@ const DICTIONARY = {
     'app.empty.sub': 'Comece uma sessão para rodar comandos, editar arquivos e ver o que o Claude faz.',
     'app.composer.placeholder': 'Falar com {agent}…',
     'app.composer.start': 'Comece uma sessão para escrever',
-    'app.composer.readOnly': 'Espelho somente leitura',
+    'app.composer.continue': 'Continue daqui…',
+    'app.mirrored': 'espelhada',
     'app.stop': 'Parar',
     'app.working': '{agent} está trabalhando…',
-    'toast.readOnly': 'Este é um espelho somente leitura. Use “Assumir daqui” para continuar.',
+    'toast.tookOver': 'Agora é sua — reabra no Mac e isto vai estar lá.',
     'app.jumpToLatest': 'Ir para o final ↓',
 
     // --- openers ---
@@ -105,7 +106,7 @@ const DICTIONARY = {
     'session.end': 'Encerrar sessão',
     'session.stopMirroring': 'Parar de espelhar',
     'session.mirrorExplain':
-      'Esta é uma cópia ao vivo de uma conversa rodando em outro lugar no seu Mac. Assumir cria uma sessão sua a partir daqui, sem mexer na original.',
+      'Cópia ao vivo de uma conversa aberta no seu Mac. Assumir continua a mesma conversa daqui — reabra no Mac depois e o que você escreveu no celular está lá. Um de cada vez.',
 
     // --- permissions ---
     'perm.needed': 'Precisa de permissão',
@@ -150,7 +151,7 @@ const DICTIONARY = {
     'toast.notConnected': 'Sem conexão — aguarde, reconectando.',
     'conn.connecting': 'Reconectando…',
     'conn.offline': 'Sem conexão. Toque para tentar de novo.',
-    'app.mirrorNotice': 'Espelhando uma sessão que roda em outro lugar. Use “Assumir daqui” para continuar aqui.',
+    'app.mirrorNotice': 'Essa aí roda no Claude do seu Mac. Escreva que ela continua daqui.',
 
     // --- shared verbs ---
     'action.copy': 'Copiar',

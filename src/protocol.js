@@ -8,6 +8,9 @@
 let counter = 0;
 const nextId = () => `i${(++counter).toString(36)}${Date.now().toString(36).slice(-4)}`;
 
+/** How long streaming text is allowed to accumulate before a patch goes out. */
+const FLUSH_INTERVAL_MS = 60;
+
 /** Compact one-line labels for tool calls, so a phone screen stays readable. */
 export function summarizeTool(name, input = {}) {
   const str = (v) => (typeof v === 'string' ? v : v == null ? '' : JSON.stringify(v));
@@ -203,6 +206,12 @@ export function normalizeToolResult(raw, limit = 20000) {
     else if (typeof raw.stdout === 'string' || typeof raw.stderr === 'string') {
       text = [raw.stdout, raw.stderr].filter(Boolean).join('\n');
       if (raw.stderr && !raw.stdout) isError = Boolean(raw.is_error);
+    } else if (raw.type === 'image' && raw.file?.base64) {
+      // Reading an image hands back the whole picture as base64. Falling
+      // through to JSON.stringify put 20KB of it in the tool card, down the
+      // socket and into the DOM. The picture itself is served separately.
+      const size = raw.file.dimensions;
+      text = size ? `[image ${size.originalWidth}×${size.originalHeight}]` : '[image]';
     } else text = JSON.stringify(raw, null, 2);
   }
 
@@ -231,11 +240,42 @@ export class Feed {
     this.blockIndex = new Map();
     /** tool_use_id -> item, so results can find their call. */
     this.toolIndex = new Map();
+    /** Items whose text grew but whose patch has not gone out yet; see touch(). */
+    this.pending = new Set();
+    this.flushTimer = null;
   }
 
-  /** Everything changed since `since`, still in creation order. */
+  /** Everything changed since `since`. Items are already in creation order. */
   snapshot(since = 0) {
-    return this.items.filter((item) => item.seq > since).sort((a, b) => a.ord - b.ord);
+    return this.items.filter((item) => item.seq > since);
+  }
+
+  /**
+   * Note that a streaming item grew, without sending a patch for it yet.
+   *
+   * Every token used to become its own patch carrying the whole message so
+   * far, so one long answer meant hundreds of frames and megabytes of JSON —
+   * quadratic in the length of what was being said. One frame per 60ms reads
+   * identically on a phone and costs a fraction.
+   */
+  touch(item) {
+    item.seq = ++this.seq;
+    this.pending.add(item);
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => this.flush(), FLUSH_INTERVAL_MS);
+    this.flushTimer.unref?.();
+  }
+
+  /** Send what touch() has been holding. Anything else patching goes first. */
+  flush() {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (!this.pending.size) return;
+    const held = [...this.pending];
+    this.pending.clear();
+    for (const item of held) this.onPatch({ op: 'update', item });
   }
 
   append(item) {
@@ -262,6 +302,7 @@ export class Feed {
       ord: ++this.ord,
       at: item.at || Date.now(),
     };
+    this.flush(); // held text belongs before whatever comes next
     this.items.push(full);
     if (this.items.length > this.maxItems) {
       const dropped = this.items.splice(0, this.items.length - this.maxItems);
@@ -275,6 +316,8 @@ export class Feed {
 
   update(item, changes) {
     if (!item) return null;
+    this.pending.delete(item); // this patch carries whatever was held
+    this.flush();
     Object.assign(item, changes);
     // Only the version moves — the item keeps its place in the transcript.
     item.seq = ++this.seq;
@@ -323,9 +366,14 @@ export class Feed {
       const item = this.blockIndex.get(`${msgId}:${e.index}`);
       if (!item) return;
       const d = e.delta || {};
-      if (d.type === 'text_delta') this.update(item, { text: (item.text || '') + d.text });
-      else if (d.type === 'thinking_delta') this.update(item, { text: (item.text || '') + d.thinking });
-      else if (d.type === 'input_json_delta') {
+      if (d.type === 'text_delta') {
+        item.text = (item.text || '') + d.text;
+        this.touch(item);
+      } else if (d.type === 'thinking_delta') {
+        item.text = (item.text || '') + d.thinking;
+        this.touch(item);
+      }
+      if (d.type === 'input_json_delta') {
         // Tool inputs stream as partial JSON; keep the raw string and parse at stop.
         item.rawInput = (item.rawInput || '') + (d.partial_json || '');
       }

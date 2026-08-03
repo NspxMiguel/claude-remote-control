@@ -61,6 +61,11 @@ async function api(path, opts = {}) {
     unpair(true);
     throw new Error('Device is no longer paired');
   }
+  // Not everything the daemon serves is JSON — images come back as bytes.
+  if (opts.raw) {
+    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    return res.blob();
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
   return body;
@@ -879,6 +884,7 @@ function applyItems(sessionId, items) {
   }
 
   for (const group of touchedGroups) refreshGroup(group);
+  hydrateImages(feed);
 
   // Everything from here on is live, and may be spoken.
   view.primed = true;
@@ -888,6 +894,35 @@ function applyItems(sessionId, items) {
   renderSuggestions();
   if (wasAtBottom || view.pinned) scrollToBottom();
   else $('#scroll-pin').hidden = false;
+}
+
+/**
+ * Fill in the pictures the agent looked at.
+ *
+ * The renderer leaves an `<img>` with no src, because an `<img>` cannot send
+ * an Authorization header and putting a token in a URL leaves it in history,
+ * logs and referrers. So the bytes are fetched properly and handed over as a
+ * blob. Kept so they can be released when the feed is torn down.
+ */
+const objectUrls = new Set();
+
+function hydrateImages(root) {
+  for (const img of root.querySelectorAll('img[data-src]')) {
+    const url = img.dataset.src;
+    delete img.dataset.src;
+    api(url, { raw: true })
+      .then((blob) => {
+        const src = URL.createObjectURL(blob);
+        objectUrls.add(src);
+        img.src = src;
+      })
+      .catch(() => img.closest('.tool-image')?.remove());
+  }
+}
+
+function releaseImages() {
+  for (const url of objectUrls) URL.revokeObjectURL(url);
+  objectUrls.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -1147,18 +1182,23 @@ function sessionRow(session, isMirror) {
   const row = el('div', 'row');
   const status = isMirror ? 'mirrored' : session.status;
   row.appendChild(el('i', `dot ${status}`));
+  // Over two lines rather than clipped to one. A column of "Claude Re…",
+  // "Configuraç…" tells you nothing about which conversation is which, and
+  // the name is the only thing on this row worth reading.
   row.appendChild(el('span', 'name', session.title || session.cwd || 'Session'));
-  if (isMirror && session.entrypoint) {
-    row.appendChild(el('span', 'origin-tag', session.entrypoint === 'claude-desktop' ? 'desktop' : 'cli'));
-  }
+  // Everything except this can wait for the line below; this one is why you
+  // picked the phone up.
   if (session.pendingPermissions?.length) {
-    row.appendChild(el('span', 'origin-tag', 'needs you'));
+    row.appendChild(el('span', 'origin-tag urgent', 'needs you'));
   }
   li.appendChild(row);
 
   const meta = [];
-  if (session.cwd) meta.push(session.cwd.split('/').slice(-2).join('/'));
-  if (!isMirror && session.model) meta.push(session.model.replace(/^claude-/, ''));
+  if (session.cwd) meta.push(session.cwd.split('/').pop());
+  if (isMirror && session.entrypoint) {
+    meta.push(session.entrypoint === 'claude-desktop' ? 'desktop' : 'cli');
+  }
+  if (!isMirror && session.model) meta.push(prettyModel(session.model));
   if (session.lastActivityAt) meta.push(relativeTime(session.lastActivityAt));
   li.appendChild(el('div', 'meta', meta.join(' · ')));
 
@@ -1198,13 +1238,18 @@ async function openSession(sessionId, isMirror) {
   for (const child of [...feed.children]) {
     if (child.id !== 'empty-state') child.remove();
   }
+  releaseImages();
   $('#empty-state').hidden = true;
 
   closeDrawer();
   renderSessionList();
   renderHeader();
 
-  send({ t: 'subscribe', sessionId, since: 0 });
+  // Subscribing already answers with the whole feed. Fetching it over HTTP as
+  // well sent a long conversation down the wire twice — more than a megabyte
+  // each way on a big one — so that is only the fallback for a closed socket.
+  if (send({ t: 'subscribe', sessionId, since: 0 })) return;
+
   try {
     const data = await api(`/api/sessions/${sessionId}/feed?since=0`);
     if (data.state) state.sessions.set(data.state.id, data.state);
@@ -1241,7 +1286,7 @@ function renderHeader() {
   // Only name the agent when it is not the default, to keep the line short.
   if (session.agent && session.agent !== 'claude-code') bits.push(session.agentLabel || session.agent);
   if (session.model) bits.push(session.model.replace(/^claude-/, ''));
-  if (session.readOnly) bits.push(t('app.composer.readOnly', 'read-only mirror'));
+  if (session.readOnly) bits.push(t('app.mirrored', 'mirrored'));
   $('#session-sub').textContent = bits.join(' · ');
 
   const busy = session.status === 'busy';
@@ -1255,7 +1300,7 @@ function renderHeader() {
   if (session.readOnly) {
     notice.textContent = t(
       'app.mirrorNotice',
-      'Mirroring a session running elsewhere. Open “Take over” to continue it here.',
+      'This one is running in Claude on your Mac. Type and it carries on from here.',
     );
   }
 
@@ -1270,7 +1315,12 @@ function renderHeader() {
     meta.appendChild(el('span', null, `$${session.totalCostUsd.toFixed(4)} this session`));
   }
 
-  setComposerEnabled(!session.readOnly, undefined, session.agentLabel);
+  // A mirror is watched, not dead. Typing into one continues it — see
+  // takeOver — so the composer stays live and only says so differently.
+  setComposerEnabled(true, undefined, session.agentLabel);
+  if (session.readOnly) {
+    $('#input').placeholder = t('app.composer.continue', 'Carry on from here…');
+  }
   updateTabTitle();
 }
 
@@ -1283,6 +1333,49 @@ function updateTabTitle() {
   if (pending) document.title = `(${pending}) Permission needed${name}`;
   else if (session?.status === 'busy') document.title = `● Working${name}`;
   else document.title = `Claude Remote Control${name}`;
+}
+
+/**
+ * Continue a mirrored conversation here.
+ *
+ * There is no way to type into a Claude window that is already open on the
+ * Mac — nothing in the SDK attaches to a running process. What there is, is
+ * the transcript: resuming it without forking means the daemon appends to the
+ * same file, so this is genuinely the same conversation. Close it here and
+ * reopen it on the Mac and your phone's turns are in it.
+ *
+ * One driver at a time, though. Two processes appending at once would branch
+ * the same conversation in two directions.
+ *
+ * Returns the new session, or null if it could not be started.
+ */
+async function takeOver() {
+  const session = currentSession();
+  if (!session) return null;
+  const wasBusy = $('#send').disabled;
+  $('#send').disabled = true;
+  try {
+    const { session: created } = await api('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        cwd: session.cwd,
+        resumeFrom: session.claudeSessionId || session.id,
+        // Not a fork: the same conversation, so the Mac sees these turns when
+        // it next opens it. That is the whole point of taking over.
+        forkSession: false,
+        title: session.title,
+      }),
+    });
+    state.sessions.set(created.id, created);
+    await openSession(created.id, false);
+    toast(t('toast.tookOver', 'Yours now — reopen it on the Mac and this is in it.'));
+    return created;
+  } catch (err) {
+    toast(err.message);
+    return null;
+  } finally {
+    $('#send').disabled = wasBusy;
+  }
 }
 
 function setComposerEnabled(enabled, disabledHint = 'Read-only mirror', agentLabel) {
@@ -2665,14 +2758,16 @@ function wireUp() {
     }
   });
 
-  $('#composer').addEventListener('submit', (event) => {
+  $('#composer').addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = input.value.trim();
     if ((!text && !state.pending.length) || !state.currentId) return;
-    const session = currentSession();
-    if (session?.readOnly) {
-      toast(t('toast.readOnly', 'This is a read-only mirror. Use “Take over” to continue it.'));
-      return;
+
+    // Typing into a mirrored conversation takes it over, rather than refusing.
+    // Nobody types a message in order to be told to press a button.
+    if (currentSession()?.readOnly) {
+      const continued = await takeOver();
+      if (!continued) return;
     }
 
     const images = state.pending.map(({ mediaType, data, thumbnail }) => ({ mediaType, data, thumbnail }));
@@ -2807,25 +2902,8 @@ function wireUp() {
   });
 
   $('#opt-takeover').addEventListener('click', async () => {
-    const session = currentSession();
-    if (!session) return;
-    try {
-      const { session: created } = await api('/api/sessions', {
-        method: 'POST',
-        body: JSON.stringify({
-          cwd: session.cwd,
-          resumeFrom: session.claudeSessionId || session.id,
-          forkSession: true,
-          title: session.title,
-        }),
-      });
-      $('#opts-sheet').hidden = true;
-      state.sessions.set(created.id, created);
-      await openSession(created.id, false);
-      toast('Took over — continuing here');
-    } catch (err) {
-      toast(err.message);
-    }
+    $('#opts-sheet').hidden = true;
+    await takeOver();
   });
 
   $('#opt-close-session').addEventListener('click', async () => {
@@ -2839,6 +2917,7 @@ function wireUp() {
       renderHeader();
       const feed = $('#feed');
       for (const child of [...feed.children]) if (child.id !== 'empty-state') child.remove();
+      releaseImages();
       $('#empty-state').hidden = false;
     } catch (err) {
       toast(err.message);

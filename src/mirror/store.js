@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { Feed } from '../protocol.js';
 import { log } from '../log.js';
 import { applyTranscriptLine, foldToolResult, isRealModel, parseLines } from './transcript.js';
@@ -11,7 +12,69 @@ const PROJECTS_DIR =
   process.env.CRC_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects');
 /** Cap how much history we replay for a huge transcript. */
 const MAX_REPLAY_BYTES = 8 * 1024 * 1024;
+/** Read the replay in slices this size, never as one allocation. */
+const REPLAY_CHUNK_BYTES = 256 * 1024;
+/** How many read images one mirror holds on to. */
+const MAX_KEPT_IMAGES = 40;
 const POLL_INTERVAL_MS = 400;
+
+/**
+ * Walk a file from `start` in fixed slices, handing each one over as text.
+ *
+ * Reading a 57MB transcript as one Buffer plus one string added ~50MB to the
+ * daemon that V8 never handed back. The decoder is there because a slice
+ * boundary lands mid-character often enough to matter in a file full of
+ * accented text.
+ */
+async function readChunks(file, start, end, onText) {
+  const handle = await fsp.open(file, 'r');
+  const decoder = new StringDecoder('utf8');
+  try {
+    const buf = Buffer.alloc(REPLAY_CHUNK_BYTES);
+    let offset = start;
+    let first = true;
+    while (offset < end) {
+      const { bytesRead } = await handle.read(buf, 0, buf.length, offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+      const text = decoder.write(buf.subarray(0, bytesRead));
+      if (text) onText(text, first);
+      first = false;
+    }
+    const tail = decoder.end();
+    if (tail) onText(tail, first);
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Replay a transcript's recent history into a feed that is not a mirror's.
+ *
+ * This is what stops a taken-over conversation from opening blank: the agent
+ * resumes where it left off, but nothing replays the history to the phone, so
+ * without this you continue a conversation you cannot see.
+ */
+export async function replayTranscriptInto(file, feed) {
+  const stat = await fsp.stat(file);
+  const start = stat.size > MAX_REPLAY_BYTES ? stat.size - MAX_REPLAY_BYTES : 0;
+  if (start > 0) feed.append({ kind: 'system', text: 'Older history truncated' });
+
+  let carry = '';
+  await readChunks(file, start, stat.size, (text, first) => {
+    const usable = first && start > 0 ? text.slice(text.indexOf('\n') + 1) : text;
+    const { lines, remainder } = parseLines(usable, carry);
+    carry = remainder;
+    for (const line of lines) {
+      try {
+        applyTranscriptLine(feed, line);
+        foldToolResult(feed, line);
+      } catch (err) {
+        log.debug(`replay: bad line — ${err?.message}`);
+      }
+    }
+  });
+}
 
 async function readSlice(file, start, length) {
   const handle = await fsp.open(file, 'r');
@@ -98,9 +161,18 @@ class MirrorSession extends EventEmitter {
     this.offset = 0;
     this.carry = '';
     this.watching = false;
+    this.images = new Map();
+    /**
+     * True while replaying history. Every one of those lines would otherwise
+     * emit a patch, so re-opening a long conversation shipped thousands of
+     * them to a client that is about to be handed the whole snapshot anyway.
+     */
+    this.replaying = false;
     this.feed = new Feed({
       maxItems: config.maxFeedItems,
-      onPatch: (patch) => this.emit('patch', patch),
+      onPatch: (patch) => {
+        if (!this.replaying) this.emit('patch', patch);
+      },
     });
   }
 
@@ -127,14 +199,21 @@ class MirrorSession extends EventEmitter {
   async load() {
     const stat = await fsp.stat(this.info.file);
     let start = 0;
+    this.replaying = true;
     if (stat.size > MAX_REPLAY_BYTES) {
       start = stat.size - MAX_REPLAY_BYTES;
       this.feed.append({ kind: 'system', text: 'Older history truncated' });
     }
-    const chunk = await readSlice(this.info.file, start, stat.size - start);
-    // A mid-file start can slice a line in half; drop the partial first line.
-    const usable = start > 0 ? chunk.slice(chunk.indexOf('\n') + 1) : chunk;
-    this.ingest(usable);
+
+    try {
+      await readChunks(this.info.file, start, stat.size, (text, first) => {
+        // A mid-file start can slice a line in half; drop the partial one.
+        this.ingest(first && start > 0 ? text.slice(text.indexOf('\n') + 1) : text);
+      });
+    } finally {
+      this.replaying = false;
+    }
+
     this.offset = stat.size;
     return this;
   }
@@ -145,7 +224,7 @@ class MirrorSession extends EventEmitter {
     for (const line of lines) {
       try {
         const meta = applyTranscriptLine(this.feed, line);
-        foldToolResult(this.feed, line);
+        foldToolResult(this.feed, line, { onImage: (id, picture) => this.keepImage(id, picture) });
         if (meta.title) {
           if (meta.titleKind === 'custom') this.info.customTitle = meta.title;
           else this.info.aiTitle = meta.title;
@@ -159,6 +238,20 @@ class MirrorSession extends EventEmitter {
         log.debug(`mirror ${this.id}: bad line — ${err?.message}`);
       }
     }
+  }
+
+  /**
+   * Hold on to a picture so the feed can point at it instead of carrying it.
+   *
+   * Bounded on purpose: a long session full of screenshots would otherwise
+   * pin every one of them in memory for as long as the mirror is open.
+   */
+  keepImage(toolUseId, picture) {
+    this.images.set(toolUseId, picture);
+    while (this.images.size > MAX_KEPT_IMAGES) {
+      this.images.delete(this.images.keys().next().value);
+    }
+    return `/api/transcripts/${encodeURIComponent(this.id)}/images/${encodeURIComponent(toolUseId)}`;
   }
 
   startWatching() {

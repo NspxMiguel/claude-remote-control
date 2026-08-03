@@ -128,6 +128,7 @@ export class RemoteControlServer {
 
   async close() {
     clearInterval(this.sweeper);
+    clearInterval(this.heartbeat);
     // Hand back the sleep settings we took. Closed-lid mode is a system-wide
     // flag: left set by a daemon that is no longer running, it becomes a Mac
     // that never sleeps and nothing on screen to say why.
@@ -212,6 +213,10 @@ export class RemoteControlServer {
       }
       case 'unsubscribe':
         state.subscribed.delete(msg.sessionId);
+        // The mirror behind it holds a file poller and a feed. Waiting for the
+        // next sweep meant browsing the session list left a watcher running
+        // for every transcript you glanced at, for up to a minute each.
+        this.sweepIdleMirrors();
         break;
       case 'prompt': {
         const session = this.sessions.get(msg.sessionId);
@@ -238,11 +243,16 @@ export class RemoteControlServer {
   }
 
   broadcast(message, sessionId) {
-    const payload = JSON.stringify(message);
+    // Serialised only once a real recipient is found. A session left running
+    // with the phone away used to stringify every patch — megabytes over one
+    // long answer — for nobody, which is exactly the case this app exists for.
+    if (this.clients.size === 0) return;
+    let payload;
     for (const [ws, state] of this.clients) {
       if (ws.readyState !== ws.OPEN) continue;
       // Feed patches only go to clients watching that session; state is global.
       if (sessionId && !state.subscribed.has(sessionId)) continue;
+      payload ??= JSON.stringify(message);
       ws.send(payload);
     }
   }
@@ -325,17 +335,47 @@ export class RemoteControlServer {
     return identity;
   }
 
+  /**
+   * Remember an answer for a while.
+   *
+   * The expensive routes here are expensive because they shell out — tailscale
+   * status, agy --version, pmset, the keychain. A phone that reconnects, or a
+   * settings screen that saves twice, should not fork a dozen processes to be
+   * told the same thing.
+   */
+  memo(key, ttlMs, build) {
+    this.memos ||= new Map();
+    const hit = this.memos.get(key);
+    const now = Date.now();
+    if (hit && now - hit.at < ttlMs) return hit.value;
+    const value = Promise.resolve(build()).catch((err) => {
+      this.memos.delete(key); // a failure must not be cached
+      throw err;
+    });
+    this.memos.set(key, { at: now, value });
+    return value;
+  }
+
+  /** Drop what the machine reports about itself, after something changed it. */
+  forgetMachineState() {
+    this.memos?.delete('machine');
+    this.memos?.delete('setup');
+  }
+
+  async machineState() {
+    return this.memo('machine', 15_000, async () => {
+      const [reach, { detectDrivers }] = await Promise.all([
+        reachableUrls(this.config.port, this.config.host),
+        import('./agent/drivers/index.js'),
+      ]);
+      return { ...reach, agents: await detectDrivers(this.config) };
+    });
+  }
+
   /** The unauthenticated readiness summary, recomputed at most every 15s. */
   async hello() {
-    const now = Date.now();
-    if (this.helloCache && now - this.helloCache.at < 15_000) return this.helloCache.value;
-
-    const [{ tailscale, localOnly }, { detectDrivers }] = await Promise.all([
-      reachableUrls(this.config.port, this.config.host),
-      import('./agent/drivers/index.js'),
-    ]);
-    const agents = await detectDrivers(this.config);
-    const value = {
+    const { tailscale, localOnly, agents } = await this.machineState();
+    return {
       ok: true,
       version: PKG.version,
       hostname: os.hostname(),
@@ -344,8 +384,6 @@ export class RemoteControlServer {
       localOnly: Boolean(localOnly),
       agents: agents.map(({ id, label, available }) => ({ id, label, available })),
     };
-    this.helloCache = { at: now, value };
-    return value;
   }
 
   async handleApi(req, res, url) {
@@ -398,10 +436,9 @@ export class RemoteControlServer {
 
     // --- state ---------------------------------------------------------------------
     if (route === 'state' && method === 'GET') {
-      const { urls, tailscale, localOnly } = await reachableUrls(this.config.port, this.config.host);
-      const { detectDrivers } = await import('./agent/drivers/index.js');
+      const { urls, tailscale, localOnly, agents } = await this.machineState();
       json(res, 200, {
-        agents: await detectDrivers(this.config),
+        agents,
         version: PKG.version,
         hostname: os.hostname(),
         connectedClients: this.clients.size,
@@ -445,6 +482,25 @@ export class RemoteControlServer {
         title: body.title,
         driver: body.agent,
       });
+
+      // Resuming a conversation should show the conversation. The agent picks
+      // up where it left off either way, but nothing replays the history into
+      // a fresh feed, so without this you carry on talking to a blank screen.
+      if (body.resumeFrom) {
+        const file = await this.mirrors.findFile(body.resumeFrom);
+        if (file) {
+          session.replaying = true;
+          try {
+            const { replayTranscriptInto } = await import('./mirror/store.js');
+            await replayTranscriptInto(file, session.feed);
+          } catch (err) {
+            log.debug(`resume replay failed: ${err?.message}`);
+          } finally {
+            session.replaying = false;
+          }
+        }
+      }
+
       json(res, 201, { session: session.toJSON() });
       return;
     }
@@ -519,6 +575,24 @@ export class RemoteControlServer {
       return;
     }
 
+    // An image the agent read, served from the transcript rather than carried
+    // through the feed — the base64 for one screenshot is a quarter of a
+    // megabyte, and it would travel on every reconnect.
+    const imageMatch = route.match(/^transcripts\/([^/]+)\/images\/([A-Za-z0-9_-]+)$/);
+    if (imageMatch && method === 'GET') {
+      const picture = this.mirrors.get(decodeURIComponent(imageMatch[1]))?.images.get(imageMatch[2]);
+      if (!picture) throw Object.assign(new Error('No such image'), { status: 404 });
+      const bytes = Buffer.from(picture.base64, 'base64');
+      res.writeHead(200, {
+        'content-type': picture.mediaType,
+        'content-length': bytes.length,
+        // The id is content-addressed by the tool call, so it never changes.
+        'cache-control': 'private, max-age=86400',
+      });
+      res.end(bytes);
+      return;
+    }
+
     // --- filesystem picker ----------------------------------------------------------
     if (route === 'fs' && method === 'GET') {
       // realPath first: a symlink inside an allowed root must not lead out of it.
@@ -545,7 +619,10 @@ export class RemoteControlServer {
     if (route === 'setup' && method === 'GET') {
       const { checkTasks, closedLid, keepAwake, suggestedRoots } = await import('./setup.js');
       json(res, 200, {
-        tasks: await checkTasks(),
+        // Seven processes to answer "is Homebrew there". Cached briefly; the
+        // switches below it are not, since those reflect something you just
+        // flipped and have to read back true.
+        tasks: await this.memo('setup', 30_000, checkTasks),
         keepAwake: keepAwake.toJSON(),
         closedLid: await closedLid.state(),
         suggestedRoots: suggestedRoots(),
@@ -574,7 +651,10 @@ export class RemoteControlServer {
     const setupMatch = route.match(/^setup\/([^/]+)$/);
     if (setupMatch && method === 'POST') {
       const { runTask } = await import('./setup.js');
-      json(res, 200, { task: await runTask(setupMatch[1]) });
+      const task = await runTask(setupMatch[1]);
+      // Running one is precisely how the checklist stops being true.
+      this.forgetMachineState();
+      json(res, 200, { task });
       return;
     }
 
@@ -642,12 +722,16 @@ export class RemoteControlServer {
       if (method === 'POST') {
         const body = await readJsonBody(req);
         const described = setCredential(this.config, agentId, body.apiKey);
+        // Whether an agent is signed in is part of what the machine reports,
+        // and this is the moment it changed.
+        this.forgetMachineState();
         log.info(`credentials set for ${agentId}`);
         json(res, 200, { credential: described });
         return;
       }
       if (method === 'DELETE') {
         const cleared = clearCredential(this.config, agentId);
+        this.forgetMachineState();
         json(res, 200, { cleared, credential: describeCredential(this.config, agentId) });
         return;
       }

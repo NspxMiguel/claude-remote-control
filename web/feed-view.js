@@ -424,5 +424,18 @@ export function renderToolBody(body, item) {
     body.appendChild(el('p', 'label', item.status === 'error' ? 'Error' : 'Output'));
     body.appendChild(el('pre', 'code-block', item.result));
   }
+
+  // A picture the agent looked at. Left with no src on purpose: the caller
+  // fetches it with the auth header and hands the bytes over, because an
+  // <img> cannot carry one and a token does not belong in a URL.
+  if (item.imageUrl) {
+    const figure = el('div', 'tool-image');
+    const img = document.createElement('img');
+    img.alt = 'Image the agent read';
+    img.loading = 'lazy';
+    img.dataset.src = item.imageUrl;
+    figure.appendChild(img);
+    body.appendChild(figure);
+  }
 }
 
