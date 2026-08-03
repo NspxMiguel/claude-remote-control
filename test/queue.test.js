@@ -131,15 +131,15 @@ describe('the queue', () => {
     assert.match(s.feed.items.at(-1).text, /2 queued messages dropped/);
   });
 
-  test('typing before the agent has started still queues rather than vanishing', () => {
+  test('the first message goes even before the agent says it is ready', () => {
+    // Claude Code does not start until a prompt arrives. Queueing this one
+    // would leave the message waiting for a session that is waiting for the
+    // message — which is exactly what it did.
     sent.length = 0;
     const s = new Session({ config, cwd: WORK, driver: 'stub' }); // status: starting
     s.send('early');
-    assert.equal(s.queue.length, 1);
-    assert.deepEqual(sent, []);
-
-    s.setStatus('idle');
     assert.deepEqual(sent, ['early']);
+    assert.equal(s.queue.length, 0);
   });
 });
 

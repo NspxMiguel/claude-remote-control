@@ -499,7 +499,12 @@ export class Session extends EventEmitter {
     // Waiting to be sent, not dropped and not jammed into the middle of a turn.
     // You get to type the next three things and put the phone down; the queue
     // lives here rather than on the phone so locking it does not lose them.
-    const waiting = this.busy || this.status === 'starting';
+    //
+    // Only while it is busy. Holding the first message back until the agent
+    // says it is ready deadlocks Claude Code, which does not start until a
+    // prompt arrives: the message waits for a session that is waiting for the
+    // message. A driver that is still starting buffers what it is handed.
+    const waiting = this.busy;
 
     // The transcript carries thumbnails, never the full-size bytes: it is
     // replayed in full on every reconnect.

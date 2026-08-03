@@ -44,8 +44,24 @@ async function checkClaudeCode(config) {
  * absence is proof a remote session will fail — which is the failure worth
  * catching before you're away from the machine.
  */
+/**
+ * Whether Claude Code has a login on this machine.
+ *
+ * The keychain is asked last, and only as a fallback. It used to be asked
+ * first, and it lied: a daemon launched by the menu bar app queries it from a
+ * bundle whose signature changes on every upgrade, so the ACL no longer
+ * recognises the caller — the lookup fails and a signed-in machine reads as
+ * signed out. It is also what makes macOS put a password dialog on screen for
+ * an app you only opened.
+ *
+ * `~/.claude.json` needs none of that. Claude Code writes the account it is
+ * logged in as there, in plain sight, and reading a file cannot prompt.
+ */
 export async function checkLogin() {
   if (process.env.ANTHROPIC_API_KEY) return ok('Credentials', 'ANTHROPIC_API_KEY is set');
+
+  const account = oauthAccount();
+  if (account) return ok('Credentials', `signed in as ${account}`);
 
   const credentialsFile = path.join(os.homedir(), '.claude', '.credentials.json');
   if (fs.existsSync(credentialsFile)) return ok('Credentials', 'signed in (credentials file)');
@@ -66,6 +82,20 @@ export async function checkLogin() {
       'browser login for you. Being signed into the Claude Desktop app is not ' +
       'enough on its own: the daemon launches the CLI, which keeps its own credentials.',
   );
+}
+
+/** The address Claude Code says it is logged in as, or null. */
+export function oauthAccount() {
+  try {
+    const file = path.join(os.homedir(), '.claude.json');
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const email = parsed?.oauthAccount?.emailAddress;
+    return typeof email === 'string' && email.includes('@') ? email : null;
+  } catch {
+    // Missing, unreadable or half-written — none of which is an answer, so
+    // the checks after this one get their turn.
+    return null;
+  }
 }
 
 async function checkPort(config) {
