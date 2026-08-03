@@ -554,6 +554,30 @@ export class RemoteControlServer {
         json(res, 200, { session: session.toJSON() });
         return;
       }
+      // Claude Desktop cannot be told to start a conversation — it is a window,
+      // not a command. What it can do is import one: its own claude://resume
+      // handler calls importCliSession, and every session this daemon runs
+      // writes the same transcript a CLI session does. So the answer to "start
+      // one in Claude Desktop" is: start it here, then send it over.
+      if (action === 'open-in-desktop' && method === 'POST') {
+        if (process.platform !== 'darwin') {
+          throw Object.assign(new Error('Claude Desktop is macOS-only.'), { status: 400 });
+        }
+        const agentSession = session.toJSON().claudeSessionId;
+        if (!agentSession || !/^[0-9a-f-]{36}$/i.test(agentSession)) {
+          throw Object.assign(
+            new Error('This session has not been given an id yet — send it something first.'),
+            { status: 409 },
+          );
+        }
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        await promisify(execFile)('open', [`claude://resume?session=${agentSession}`], { timeout: 10000 });
+        log.info(`handed session ${agentSession} to Claude Desktop`);
+        json(res, 200, { opened: true });
+        return;
+      }
+
       const queuedMatch = action?.match(/^queue\/(.+)$/);
       if (queuedMatch && method === 'DELETE') {
         json(res, 200, { cancelled: session.cancelQueued(decodeURIComponent(queuedMatch[1])) });

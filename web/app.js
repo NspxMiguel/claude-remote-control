@@ -2689,6 +2689,8 @@ function openSessionOptions() {
   }
 
   $('#opt-takeover').hidden = !readOnly;
+  // Needs an id from the agent, which only exists once it has actually run.
+  $('#opt-desktop').hidden = !session.claudeSessionId;
   $('#opt-close-session').textContent = readOnly ? 'Stop mirroring' : 'End session';
   $('#opts-sheet').hidden = false;
 }
@@ -3140,6 +3142,24 @@ function wireUp() {
   $('#opt-takeover').addEventListener('click', async () => {
     $('#opts-sheet').hidden = true;
     await takeOver();
+  });
+
+  // Claude Desktop is a window, not a command — it cannot be told to start a
+  // conversation. It can be handed one: this is the same transcript, opened
+  // over there. Which is what "start a session in Claude Desktop" actually
+  // means from a phone.
+  $('#opt-desktop').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await api(`/api/sessions/${state.currentId}/open-in-desktop`, { method: 'POST' });
+      $('#opts-sheet').hidden = true;
+      toast(t('toast.openedDesktop', 'Opened on your Mac, in Claude Desktop.'));
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      button.disabled = false;
+    }
   });
 
   $('#opt-close-session').addEventListener('click', async () => {
