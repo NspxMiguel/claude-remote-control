@@ -527,12 +527,22 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   max-width: 62%;
 }
 .topbar-title strong {
+  /* Takes the room first. The subtitle used to be flex:none, so on a phone it
+   * kept every pixel it wanted and clipped the conversation's name down to
+   * "A…" — the one thing on this bar worth reading. */
+  flex: 1 1 60%; min-width: 3ch;
   font-size: var(--t-ui); font-weight: 500; letter-spacing: -.01em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .topbar-title span {
+  flex: 0 1 auto; min-width: 0;
   font-size: var(--t-small); color: var(--text-faint);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Below this there is only room for one of them, and it is the name. The
+ * folder, model and mirrored-ness are all a tap away in the session sheet. */
+@media (max-width: 420px) {
+  .topbar-title span { display: none; }
 }
 
 .feed {
@@ -1889,3 +1899,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   color: var(--text-faint);
   font-weight: 600;
 }
+
+/* A collapsed reasoning row carries its opening words, so a stack of them
+ * reads as different thoughts rather than four identical labels. */
+.thinking summary { display: flex; align-items: baseline; gap: var(--s3); min-width: 0; }
+.thinking-label { flex: none; }
+.thinking-peek {
+  flex: 1 1 auto; min-width: 0;
+  font-size: var(--t-meta);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.thinking[open] .thinking-peek { display: none; }

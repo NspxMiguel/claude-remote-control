@@ -15,6 +15,15 @@ const KIND_VERB = { write: 'Edited', run: 'Ran', read: 'Read', other: 'Used' };
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+/** The opening of a passage, for a collapsed row that has to stand for it. */
+function firstWords(text, limit = 80) {
+  const flat = String(text).replace(/\s+/g, ' ').trim();
+  if (flat.length <= limit) return flat;
+  const cut = flat.slice(0, limit);
+  const space = cut.lastIndexOf(' ');
+  return `${cut.slice(0, space > 40 ? space : limit)}…`;
+}
+
 /**
  * The one-line summary for a run of tool calls, in the shape the Claude Code
  * desktop app uses: "Created 6 files", "Ran 2 commands, created e2e.mjs".
@@ -257,7 +266,14 @@ export function renderItem(item) {
     case 'thinking': {
       if (!item.text?.trim()) return null;
       const details = el('details', 'item thinking');
-      details.appendChild(el('summary', null, 'Thinking'));
+      // Reasoning either side of a tool call does not merge — the tool is
+      // absorbed into its group card, so the boxes end up stacked. Four rows
+      // all reading "Thinking" tell you nothing about which is which; the
+      // first few words tell you whether it is worth opening.
+      const summary = el('summary');
+      summary.appendChild(el('span', 'thinking-label', 'Thinking'));
+      summary.appendChild(el('span', 'thinking-peek', firstWords(item.text)));
+      details.appendChild(summary);
       details.appendChild(el('div', 'body', item.text));
       return withMeta(details, item);
     }
