@@ -98,13 +98,19 @@
     --border: #e2ded7;
     --border-soft: #edeae4;
     --text: #17161a;
-    --text-dim: #5c5a63;
-    --text-faint: #8a8791;
-    --text-ghost: #a9a6b0;
-    --accent: #b85f37;
+    --text-dim: #55535c;
+    /* Measured, not eyeballed: at #8a8791 every meta line, section heading and
+     * group label sat at 3.5:1 on the light background, under the 4.5:1 that
+     * text this size needs. These clear it. */
+    --text-faint: #6e6b76;
+    --text-ghost: #8d8a95;
+    /* A touch deeper than the dark theme's accent so white sits on it at
+     * 4.85:1 rather than 4.44 — the label on every primary button. */
+    --accent: #b2582f;
     --accent-dim: #a8593a;
     --on-accent: #fff;
-    --ok: #2f8a52;
+    /* Same reason: the +N of a diffstat was 4.06 on a white card. */
+    --ok: #2a7d4a;
     --warn: #8b6a12;
     --danger: #c2372c;
     --thinking: #6b5bc4;
@@ -675,7 +681,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 }
 .thinking summary::-webkit-details-marker { display: none; }
 .thinking[open] summary { margin-bottom: var(--s2); }
-.thinking .body { white-space: pre-wrap; line-height: 1.65; animation: rise-sm var(--d2) var(--ease) both; }
+.thinking .body {
+  white-space: pre-wrap;
+  /* Reasoning runs words together across em dashes — "jurisdictions—Portuguese"
+   * has nowhere to break, and ran off the edge of a phone. */
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+  animation: rise-sm var(--d2) var(--ease) both;
+}
 
 /* ---- a run of tool calls ---------------------------------------------------
  * The most-used element in the app. Collapsed it is a line of text with no box
@@ -873,6 +886,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   max-width: 92%;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  /* Notes carry file paths — "Attached /Users/…/Sources/Cadenza/DriveSync.swift"
+   * has no space to break at, so on a phone it ran 200px off the right edge. */
+  overflow-wrap: anywhere;
 }
 .note.error {
   color: var(--danger);
