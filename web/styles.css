@@ -1913,3 +1913,37 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .thinking[open] .thinking-peek { display: none; }
+
+/* Switch a whole origin out of the list — Claude Desktop or the terminal. */
+.origin-filter { display: flex; gap: var(--s2); margin-bottom: var(--s3); }
+.origin-chip {
+  flex: 1 1 0; min-width: 0;
+  min-height: 34px;
+  padding: 0 var(--s3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  background: var(--accent-wash);
+  color: var(--text);
+  font-size: var(--t-small);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.origin-chip.off {
+  border-color: var(--border);
+  background: none;
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+/* Making a folder from the picker, rather than walking to a terminal. */
+.picker-new { color: var(--accent); }
+.picker-new-name {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: var(--t-ui);
+}
+.picker-new-name:focus { outline: none; }

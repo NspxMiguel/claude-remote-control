@@ -72,6 +72,8 @@ const DICTIONARY = {
     'app.mirrorNote': 'Sessões do Claude Desktop e do CLI. Acompanhe e assuma quando quiser.',
     'app.noLive': 'Nenhuma sessão rodando. Comece uma acima.',
     'app.search': 'Buscar conversas',
+    'picker.newProject': 'Projeto novo…',
+    'picker.projectName': 'Nome da pasta',
     'app.tidyNames': 'Arrumar os nomes com IA',
     'app.tidying': 'Pensando nos nomes…',
     'app.showAll': 'Ver todas as {n}',

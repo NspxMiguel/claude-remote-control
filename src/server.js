@@ -652,6 +652,28 @@ export class RemoteControlServer {
       return;
     }
 
+    if (route === 'fs/mkdir' && method === 'POST') {
+      const body = await readJsonBody(req);
+      const parent = realPath(body.parent || this.config.defaultCwd);
+      if (!isPathAllowed(this.config, parent)) {
+        throw Object.assign(new Error('Path outside allowed roots'), { status: 403 });
+      }
+      // One folder, here. Not a path: a name with a slash or a .. in it would
+      // be a way to write outside the roots that were just checked.
+      const name = String(body.name || '').trim();
+      if (!name || name.length > 64 || /[/\\]|^\.\.?$/.test(name)) {
+        throw Object.assign(new Error('That is not a folder name.'), { status: 400 });
+      }
+      const target = path.join(parent, name);
+      if (fs.existsSync(target)) {
+        throw Object.assign(new Error(`${name} is already there.`), { status: 409 });
+      }
+      await fsp.mkdir(target);
+      log.info(`created project folder ${target}`);
+      json(res, 201, { path: target, name });
+      return;
+    }
+
     // --- device management (master token only) --------------------------------------
     // --- setup tasks ------------------------------------------------------------------
     if (route === 'setup' && method === 'GET') {

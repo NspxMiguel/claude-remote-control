@@ -1178,6 +1178,41 @@ function renderSessionList() {
 
 /** How many conversations the list shows before you ask for the rest. */
 const RECENT_LIMIT = 3;
+const HIDDEN_ORIGINS_KEY = 'crc.hiddenOrigins';
+
+/** Which app a mirrored conversation belongs to. */
+const originOf = (session) => (session.entrypoint === 'claude-desktop' ? 'desktop' : 'cli');
+
+/**
+ * Origins you have switched off.
+ *
+ * Someone who only ever drives the terminal does not want a list two thirds
+ * full of desktop conversations. Kept on the device rather than in the
+ * daemon's config: it is about this phone's list, not about the Mac.
+ */
+function hiddenOrigins() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(HIDDEN_ORIGINS_KEY) || '[]');
+    return new Set(Array.isArray(stored) ? stored : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function toggleOrigin(origin) {
+  const hidden = hiddenOrigins();
+  if (hidden.has(origin)) hidden.delete(origin);
+  else hidden.add(origin);
+  // Hiding both would leave an empty list and no way to read why, so the
+  // second one switches the first back on instead.
+  if (hidden.size >= 2) hidden.delete(origin === 'desktop' ? 'cli' : 'desktop');
+  try {
+    localStorage.setItem(HIDDEN_ORIGINS_KEY, JSON.stringify([...hidden]));
+  } catch {
+    /* private mode — the filter still works, it just is not remembered */
+  }
+  renderMirrorList();
+}
 
 /**
  * The conversations already on this Mac.
@@ -1194,8 +1229,14 @@ function renderMirrorList() {
   const list = $('#mirror-list');
   const more = $('#mirror-more');
 
+  const hidden = hiddenOrigins();
+  $('#filter-desktop').classList.toggle('off', hidden.has('desktop'));
+  $('#filter-cli').classList.toggle('off', hidden.has('cli'));
+
   // Prefer the open mirror's live state over the transcript's summary.
-  const all = state.mirrors.map((t) => ({ ...t, ...(state.sessions.get(t.id) || {}) }));
+  const all = state.mirrors
+    .map((t) => ({ ...t, ...(state.sessions.get(t.id) || {}) }))
+    .filter((s) => !hidden.has(originOf(s)));
   const matches = query
     ? all.filter((s) => `${s.title || ''} ${s.cwd || ''}`.toLowerCase().includes(query))
     : all;
@@ -1213,8 +1254,8 @@ function renderMirrorList() {
   }
 
   const buckets = [
-    { label: t('app.fromDesktop', 'Claude Desktop'), of: (s) => s.entrypoint === 'claude-desktop' },
-    { label: t('app.fromCli', 'Terminal'), of: (s) => s.entrypoint !== 'claude-desktop' },
+    { label: t('app.fromDesktop', 'Claude Desktop'), of: (s) => originOf(s) === 'desktop' },
+    { label: t('app.fromCli', 'Terminal'), of: (s) => originOf(s) === 'cli' },
   ];
   for (const bucket of buckets) {
     const mine = matches.filter(bucket.of);
@@ -1999,6 +2040,11 @@ async function openPicker(startPath, { list = '#picker-list', path = '#picker-pa
     up.addEventListener('click', () => load(data.parent).catch((e) => toast(e.message)));
     listNode.appendChild(up);
 
+    // A project you have not started yet has no folder to pick. Making one is
+    // the first step of starting it, so it belongs here rather than in a
+    // terminal you would have to walk to.
+    listNode.appendChild(newProjectRow(data.path, load));
+
     for (const dir of data.dirs) {
       const li = el('li');
       li.appendChild(icon('folder', { size: 16 }));
@@ -2009,6 +2055,58 @@ async function openPicker(startPath, { list = '#picker-list', path = '#picker-pa
   };
 
   await load(startPath);
+}
+
+/** The "new project" row, which becomes a name field when you tap it. */
+function newProjectRow(parent, load) {
+  const li = el('li', 'picker-new');
+  const show = () => {
+    li.innerHTML = '';
+    li.appendChild(icon('plus', { size: 16 }));
+    li.appendChild(el('span', null, t('picker.newProject', 'New project…')));
+  };
+
+  const create = async (name) => {
+    if (!name.trim()) return show();
+    try {
+      const made = await api('/api/fs/mkdir', {
+        method: 'POST',
+        body: JSON.stringify({ parent, name: name.trim() }),
+      });
+      await load(made.path);
+    } catch (err) {
+      toast(err.message);
+      show();
+    }
+  };
+
+  const edit = () => {
+    li.innerHTML = '';
+    const field = document.createElement('input');
+    field.type = 'text';
+    field.className = 'picker-new-name';
+    field.placeholder = t('picker.projectName', 'Folder name');
+    field.autocapitalize = 'off';
+    field.spellcheck = false;
+    field.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        create(field.value);
+      } else if (event.key === 'Escape') {
+        show();
+      }
+    });
+    // Leaving the field empty is a change of mind, not an error.
+    field.addEventListener('blur', () => (field.value.trim() ? create(field.value) : show()));
+    li.appendChild(field);
+    field.focus();
+  };
+
+  show();
+  li.addEventListener('click', (event) => {
+    if (event.target.tagName !== 'INPUT') edit();
+  });
+  return li;
 }
 
 /**
@@ -2685,6 +2783,9 @@ function wireUp() {
     state.mirrorQuery = event.target.value;
     renderMirrorList();
   });
+
+  $('#filter-desktop').addEventListener('click', () => toggleOrigin('desktop'));
+  $('#filter-cli').addEventListener('click', () => toggleOrigin('cli'));
 
   $('#mirror-rename').addEventListener('click', async (event) => {
     const button = event.currentTarget;
