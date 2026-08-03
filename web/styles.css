@@ -362,15 +362,18 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   width: min(88vw, 330px);
   background: var(--bg-raise);
   border-right: none;
-  box-shadow: 20px 0 60px rgba(0,0,0,.5);
+  /* No shadow while it is off-canvas: 60px of blur past a -102% transform
+   * still lands on screen, and on a light iPad it read as a dark smear down
+   * the left edge of the app. */
+  box-shadow: none;
   display: flex; flex-direction: column;
   transform: translateX(-102%);
-  transition: transform var(--d2) var(--ease);
+  transition: transform var(--d2) var(--ease), box-shadow var(--d2) var(--ease);
   padding-top: var(--safe-top);
   padding-bottom: var(--safe-bottom);
   padding-left: var(--safe-left);
 }
-.app.drawer-open .drawer { transform: none; }
+.app.drawer-open .drawer { transform: none; box-shadow: 20px 0 60px rgba(0,0,0,.5); }
 
 .scrim {
   position: fixed; inset: 0; z-index: 35;
@@ -1388,7 +1391,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 /* ---- desktop --------------------------------------------------------------- */
 
 @media (min-width: 900px) {
-  .drawer { position: relative; transform: none; width: 310px; box-shadow: none; border-right: 1px solid var(--border-soft); }
+  /* Also when .drawer-open is set: at this width the drawer is a column of
+   * the layout, not something that slid over it. */
+  .drawer,
+  .app.drawer-open .drawer { position: relative; transform: none; width: 310px; box-shadow: none; border-right: 1px solid var(--border-soft); }
   .scrim { display: none; }
   #menu-btn, #drawer-close { display: none; }
   .topbar { padding: var(--s3) var(--s6); justify-content: flex-start; }

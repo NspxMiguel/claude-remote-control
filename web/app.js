@@ -496,9 +496,15 @@ function installSteps() {
   // tell is that Macs do not have touch. Without this the iPad was handed
   // "open the browser menu", which is not where Add to Home Screen lives.
   const iPadAsDesktop = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
-  if (/iPhone|iPad|iPod/.test(ua) || iPadAsDesktop) {
+  const isPad = /iPad/.test(ua) || iPadAsDesktop;
+  if (/iPhone|iPod/.test(ua) || isPad) {
     return [
-      'Tap the Share button at the bottom of the screen.',
+      // Safari puts the share button under your thumb on a phone and up in
+      // the toolbar on a tablet. Sending someone to the wrong end of the
+      // screen is worse than saying nothing.
+      isPad
+        ? 'Tap the Share button in the toolbar at the top.'
+        : 'Tap the Share button at the bottom of the screen.',
       'Scroll down and choose "Add to Home Screen".',
       'Tap Add. It appears with the other apps.',
     ];
