@@ -69,10 +69,81 @@ export function parseTitles(text) {
  */
 export async function suggestTitles(config, entries) {
   if (!entries.length) return {};
+
+  const prompt = buildPrompt(entries.slice(0, MAX_BATCH));
+  const { detectDrivers } = await import('./agent/drivers/index.js');
+  const agents = await detectDrivers(config);
+  const claude = agents.find((a) => a.id === 'claude-code');
+
+  // Claude Code first because it answers in one shot with no project loaded.
+  // But naming a few conversations is not worth a sign-in someone has not
+  // done yet, so any other agent that *is* signed in gets the job instead.
+  if (!claude?.available) {
+    const other = agents.find((a) => a.available);
+    if (!other) {
+      throw Object.assign(
+        new Error('No agent is signed in, so there is nothing to think of names with.'),
+        { status: 409 },
+      );
+    }
+    const text = await askOneShot(config, other.id, prompt);
+    const titles = parseTitles(text);
+    log.info(`renamed ${Object.keys(titles).length} of ${entries.length} via ${other.id}`);
+    return titles;
+  }
+
+  return askClaude(config, prompt, entries.length);
+}
+
+/**
+ * One question, one answer, through whichever agent is available.
+ *
+ * The driver contract is built for a conversation; this holds it open just
+ * long enough for a single reply, and gives up rather than hanging if the
+ * agent decides to be chatty.
+ */
+async function askOneShot(config, driverId, prompt) {
+  const { getDriver } = await import('./agent/drivers/index.js');
+  const module = getDriver(driverId);
+  if (!module) throw new Error(`Unknown agent: ${driverId}`);
+
+  let text = '';
+  let settle;
+  const done = new Promise((resolve) => {
+    settle = resolve;
+  });
+
+  const driver = module.createDriver({
+    cwd: config.defaultCwd,
+    model: null,
+    permissionMode: 'default',
+    config,
+    emit: (event) => {
+      if (event.type === 'text') text += event.text;
+      else if (event.type === 'text_delta') text += event.text;
+      else if (event.type === 'result' || event.type === 'ended') settle();
+      else if (event.type === 'error' && event.fatal) settle();
+    },
+    requestPermission: async () => ({ behavior: 'deny', message: 'Not while naming things.' }),
+  });
+
+  const timer = setTimeout(settle, 90_000);
+  try {
+    await driver.start();
+    driver.send(prompt, []);
+    await done;
+  } finally {
+    clearTimeout(timer);
+    await driver.close?.();
+  }
+  return text;
+}
+
+async function askClaude(config, prompt, total) {
   const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
   const run = query({
-    prompt: buildPrompt(entries.slice(0, MAX_BATCH)),
+    prompt,
     options: {
       model: config.defaultModel || undefined,
       maxTurns: 1,
@@ -97,6 +168,6 @@ export async function suggestTitles(config, entries) {
   }
 
   const titles = parseTitles(text);
-  log.info(`renamed ${Object.keys(titles).length} of ${entries.length} conversations`);
+  log.info(`renamed ${Object.keys(titles).length} of ${total} conversations`);
   return titles;
 }
