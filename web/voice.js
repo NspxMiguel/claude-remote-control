@@ -133,9 +133,17 @@ function voicesReady() {
   return voicePromise;
 }
 
+/**
+ * Warm the voice list up, so the moment someone actually presses the speaker
+ * there is nothing left to wait for. Safe to call more than once.
+ */
+export function primeVoices() {
+  if (narrationSupported()) voicesReady().catch(() => {});
+}
+
 /** The best match for the page's language, or whatever the system prefers. */
-async function pickVoice(lang) {
-  const voices = await voicesReady();
+function pickVoiceNow(lang) {
+  const voices = narrationSupported() ? speechSynthesis.getVoices() : [];
   if (!voices.length) return null;
   const want = (lang || navigator.language || 'en-US').toLowerCase();
   return (
@@ -157,13 +165,24 @@ export function stopNarration() {
  * very long utterances, and short ones also mean `cancel()` stops promptly
  * when you press it again.
  */
-export async function narrate(markdown, { lang, onDone } = {}) {
+/**
+ * Read a reply out loud.
+ *
+ * Deliberately synchronous all the way to `speak()`. WebKit only honours
+ * speech that starts inside the gesture that asked for it — an `await` before
+ * the call, even one that resolves in a millisecond, and iOS refuses without a
+ * word. This used to wait for the voice list to load, which is why the button
+ * did nothing on a phone. The voices are warmed up at boot instead, and if
+ * they are still not there the system default speaks the right language
+ * anyway.
+ */
+export function narrate(markdown, { lang, onDone } = {}) {
   if (!narrationSupported()) return false;
   const text = speakableText(markdown);
   if (!text) return false;
 
   stopNarration();
-  const voice = await pickVoice(lang);
+  const voice = pickVoiceNow(lang);
 
   const chunks = text.match(/[^.!?]+[.!?]*\s*/g) || [text];
   const batched = [];

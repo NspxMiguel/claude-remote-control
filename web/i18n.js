@@ -99,6 +99,7 @@ const DICTIONARY = {
     'app.stop': 'Parar',
     'app.working': '{agent} está trabalhando…',
     'toast.tookOver': 'Agora é sua — reabra no Mac e isto vai estar lá.',
+    'toast.tookOverDesktop': 'Seguindo — e abrindo no Claude Desktop do seu Mac.',
     'app.jumpToLatest': 'Ir para o final ↓',
 
     // --- openers ---

@@ -1364,6 +1364,20 @@ async function openSession(sessionId, isMirror) {
   }
 }
 
+/**
+ * Whether a number of dollars means anything for this session.
+ *
+ * The agent reports what the same tokens would have cost through the API, and
+ * on a subscription that is a number nobody is paying — it reads as a bill for
+ * something already bought. It is only shown when the agent is actually
+ * running on an API key.
+ */
+function billedByUsage(session) {
+  if (typeof session?.totalCostUsd !== 'number') return false;
+  const agent = state.serverState?.agents?.find((a) => a.id === (session.agent || 'claude-code'));
+  return Boolean(agent?.credential?.set);
+}
+
 function currentSession() {
   return state.currentId ? state.sessions.get(state.currentId) : null;
 }
@@ -1418,7 +1432,7 @@ function renderHeader() {
     );
   } else if (queued) {
     meta.appendChild(el('span', null, t('app.queuedCount', '· {n} queued', { n: queued }).replace(/^·\s*/, '')));
-  } else if (typeof session.totalCostUsd === 'number' && session.totalCostUsd > 0) {
+  } else if (billedByUsage(session) && session.totalCostUsd > 0) {
     meta.appendChild(el('span', null, `$${session.totalCostUsd.toFixed(4)} this session`));
   }
 
@@ -1485,12 +1499,21 @@ async function takeOver() {
         // Not a fork: the same conversation, so the Mac sees these turns when
         // it next opens it. That is the whole point of taking over.
         forkSession: false,
+        // A conversation that came from Claude Desktop goes back to Claude
+        // Desktop. It is the same transcript either way, but Desktop does not
+        // reread a file on its own — so it is handed back, and the turns you
+        // added from the phone are there when you look.
+        handToDesktop: (session.origin || session.entrypoint) === 'claude-desktop',
         title: session.title,
       }),
     });
     state.sessions.set(created.id, created);
     await openSession(created.id, false);
-    toast(t('toast.tookOver', 'Yours now — reopen it on the Mac and this is in it.'));
+    toast(
+      (session.origin || session.entrypoint) === 'claude-desktop'
+        ? t('toast.tookOverDesktop', 'Carrying on — and opening in Claude Desktop on your Mac.')
+        : t('toast.tookOver', 'Yours now — reopen it on the Mac and this is in it.'),
+    );
     return created;
   } catch (err) {
     toast(err.message);
@@ -1560,8 +1583,15 @@ async function toggleDictation() {
 }
 
 /** Read one reply aloud, or stop if this one is already being read. */
-async function narrateText(text, button) {
-  const voice = await loadVoice();
+function narrateText(text, button) {
+  // Synchronous on purpose, module included: iOS only speaks inside the gesture
+  // that asked, and awaiting a dynamic import is enough to lose it. The module
+  // is loaded at boot, so by the time anyone presses this it is already here.
+  const voice = voiceModule;
+  if (!voice) {
+    toast('Still starting up — try that again.');
+    return;
+  }
   if (!voice.narrationSupported()) {
     toast('This browser cannot read text aloud.');
     return;
@@ -1575,7 +1605,7 @@ async function narrateText(text, button) {
   if (wasThisOne) return;
 
   button?.classList.add('speaking');
-  const spoke = await voice.narrate(text, { onDone: () => button?.classList.remove('speaking') });
+  const spoke = voice.narrate(text, { onDone: () => button?.classList.remove('speaking') });
   if (!spoke) {
     button?.classList.remove('speaking');
     toast('Nothing to read here — it is all code.');
@@ -1589,6 +1619,7 @@ async function narrateText(text, button) {
  */
 function maybeAutoNarrate(text) {
   if (!state.narrate || !text) return;
+  // Auto-narration is not a gesture, so awaiting here costs nothing.
   loadVoice().then((voice) => voice.narrate(text)).catch(() => {});
 }
 
@@ -2781,7 +2812,7 @@ function openSessionOptions() {
     }),
   );
 
-  if (typeof session.totalCostUsd === 'number' && session.totalCostUsd > 0) {
+  if (billedByUsage(session) && session.totalCostUsd > 0) {
     about.card.appendChild(row({ name: t('session.cost', 'Cost so far'), detail: `$${session.totalCostUsd.toFixed(4)}` }));
   }
   body.appendChild(about.section);
@@ -3516,6 +3547,12 @@ async function main() {
 
   applyStaticText();
   wireUp();
+
+  // Loaded now rather than on first press: speech only starts inside the
+  // gesture that asked for it, and an await is enough to lose that.
+  loadVoice()
+    .then((voice) => voice.primeVoices?.())
+    .catch(() => {});
 
   // Changing only the fragment does not reload the page, so links that arrive
   // while the app is already open have to be handled here too.
