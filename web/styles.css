@@ -125,12 +125,10 @@
 
 .app[data-agent="claude-code"] { --accent: #e0855f; --accent-dim: #a8593a; --on-accent: #17110d; }
 .app[data-agent="antigravity"] { --accent: #7aa5f0; --accent-dim: #4a6fae; --on-accent: #0a1020; }
-.app[data-agent="acp"]         { --accent: #b98ce6; --accent-dim: #7f5aa8; --on-accent: #120b1a; }
 
 @media (prefers-color-scheme: light) {
   .app[data-agent="claude-code"] { --accent: #b85f37; --on-accent: #fff; }
   .app[data-agent="antigravity"] { --accent: #3a63ad; --on-accent: #fff; }
-  .app[data-agent="acp"]         { --accent: #74499f; --on-accent: #fff; }
 }
 
 .bubble-user, .send, .primary, .brand-mark, .new-session,

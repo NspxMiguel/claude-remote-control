@@ -159,6 +159,22 @@ async function describeTranscript(file) {
   return info;
 }
 
+/**
+ * A conversation this app had with an agent on its own behalf, rather than one
+ * you had. Naming conversations leaves one behind every time; so does every
+ * end-to-end check. They are not yours and they crowd out the ones that are.
+ */
+function isOurOwn(info) {
+  const title = info.title || '';
+  const cwd = info.cwd || '';
+  return (
+    title.startsWith('You name chat conversations') ||
+    /\/\.e2e(\/|$)/.test(cwd) ||
+    cwd.includes('/scratchpad') ||
+    cwd.includes('/queue-test')
+  );
+}
+
 /** One live-followed transcript. Tails the file and rebuilds a feed from it. */
 class MirrorSession extends EventEmitter {
   constructor(info, config) {
@@ -342,7 +358,9 @@ export class MirrorStore extends EventEmitter {
     files.sort((a, b) => b.mtimeMs - a.mtimeMs);
     for (const { file } of files.slice(0, limit)) {
       try {
-        out.push(this.withOverride(await describeTranscript(file)));
+        const info = this.withOverride(await describeTranscript(file));
+        if (isOurOwn(info)) continue;
+        out.push(info);
       } catch (err) {
         log.debug(`skipping ${file}: ${err?.message}`);
       }

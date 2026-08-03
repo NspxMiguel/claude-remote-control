@@ -1,6 +1,6 @@
 cask "claude-remote-control" do
-  version "0.4.0"
-  sha256 "fde39677ba87ff6696537719f34fb76a00d324863c1680459c5dd32f85a2de3f"
+  version "0.8.1"
+  sha256 "9c267ae40928f100bb6f8527d0f59279fdcd0c3f2fb2c25f4ee59cf7cbe38157"
 
   # Downloads the SOURCE (not a prebuilt binary) and compiles it on the
   # installing machine. A local build means no quarantine attribute on the
@@ -120,7 +120,25 @@ cask "claude-remote-control" do
     system_command "/usr/bin/xattr", args: ["-cr", app_path]
     system_command "/usr/bin/codesign", args: ["--force", "--deep", "-s", "-", app_path]
 
+    # The app itself, and its own pairing screen, tell you to run `crc pair` in
+    # a terminal when the menu bar is not an option. That was a lie: nothing
+    # ever put `crc` on PATH, and the script inside the bundle was not even
+    # executable. Linked here rather than declared as a `binary` artifact
+    # because the file does not exist until this block has run.
+    cli = "#{app_path}/Contents/Resources/crc/bin/crc.js"
+    link = "#{HOMEBREW_PREFIX}/bin/crc"
+    FileUtils.chmod("+x", cli)
+    # `exist?` follows symlinks, so a link left pointing at the previous
+    # version's bundle reads as absent — check for the link itself too.
+    FileUtils.rm(link) if File.symlink?(link) || File.exist?(link)
+    FileUtils.ln_s(cli, link)
+
     ohai "Done. Claude Remote Control is in #{app_path} — open it and look for >_ in the menu bar."
+  end
+
+  uninstall_postflight do
+    link = "#{HOMEBREW_PREFIX}/bin/crc"
+    FileUtils.rm(link) if File.symlink?(link)
   end
 
   # The daemon's own config (~/.claude-remote-control) is deliberately left

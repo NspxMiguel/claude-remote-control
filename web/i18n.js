@@ -119,6 +119,7 @@ const DICTIONARY = {
     'session.permissions': 'Permissões',
     'session.takeover': 'Assumir daqui',
     'session.openDesktop': 'Abrir no Claude Desktop',
+    'agent.desktopNote': 'Começa aqui e abre no Claude Desktop do seu Mac assim que responder.',
     'toast.openedDesktop': 'Aberta no seu Mac, no Claude Desktop.',
     'session.end': 'Encerrar sessão',
     'session.stopMirroring': 'Parar de espelhar',

@@ -99,6 +99,12 @@ export class RemoteControlServer {
     );
     this.sessions.on('state', (state) => this.broadcast({ t: 'session', session: state }));
     this.sessions.on('sessions', () => this.broadcastSessions());
+    // Asked for at creation, done the moment the agent gives it a transcript.
+    this.sessions.on('handToDesktop', (agentSessionId) => {
+      this.openInDesktop(agentSessionId).catch((err) =>
+        log.warn(`could not hand the session to Claude Desktop: ${err?.message}`),
+      );
+    });
     this.sessions.on('permission', (payload) => this.broadcast({ t: 'permission', payload }));
     this.sessions.on('permissionResolved', (info) => this.broadcast({ t: 'permissionResolved', ...info }));
 
@@ -372,6 +378,32 @@ export class RemoteControlServer {
     });
   }
 
+  /**
+   * Hand a conversation to Claude Desktop.
+   *
+   * Claude Desktop cannot be told to start one — it is a window, not a
+   * command. What it takes is an import: its own claude://resume handler
+   * calls importCliSession, and every session here writes the same transcript
+   * a CLI session does. The parameter is `session`; a path segment or
+   * `sessionId` both log "missing or invalid session" and do nothing.
+   */
+  async openInDesktop(agentSessionId) {
+    if (process.platform !== 'darwin') {
+      throw Object.assign(new Error('Claude Desktop is macOS-only.'), { status: 400 });
+    }
+    if (!agentSessionId || !/^[0-9a-f-]{36}$/i.test(agentSessionId)) {
+      throw Object.assign(
+        new Error('This session has no transcript yet — send it something first.'),
+        { status: 409 },
+      );
+    }
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    await promisify(execFile)('open', [`claude://resume?session=${agentSessionId}`], { timeout: 10000 });
+    log.info(`handed session ${agentSessionId} to Claude Desktop`);
+    return { opened: true };
+  }
+
   /** The unauthenticated readiness summary, recomputed at most every 15s. */
   async hello() {
     const { tailscale, localOnly, agents } = await this.machineState();
@@ -472,12 +504,28 @@ export class RemoteControlServer {
 
     if (route === 'sessions' && method === 'POST') {
       const body = await readJsonBody(req);
+
+      // An agent that is not installed or not signed in used to give a 201 and
+      // a session that could never answer — and eight of those fill the slot
+      // limit, so the next real one is refused with a 429 about too many
+      // sessions. Say what is actually wrong instead.
+      if (body.agent) {
+        const { agents } = await this.machineState();
+        const chosen = agents.find((a) => a.id === body.agent);
+        if (chosen && !chosen.available) {
+          throw Object.assign(new Error(`${chosen.label} is not ready: ${chosen.detail || 'unavailable'}`), {
+            status: 409,
+          });
+        }
+      }
+
       const session = this.sessions.create({
         cwd: body.cwd,
         model: body.model,
         permissionMode: checkPermissionMode(body.permissionMode),
         effort: checkEffort(body.effort),
         ultracode: Boolean(body.ultracode),
+        handToDesktop: Boolean(body.handToDesktop),
         resumeFrom: body.resumeFrom,
         forkSession: body.forkSession !== false,
         title: body.title,
@@ -522,6 +570,17 @@ export class RemoteControlServer {
         return;
       }
 
+      // Handing a conversation to Claude Desktop works for a mirrored one as
+      // well — arguably especially — so it is answered before the lookup that
+      // only knows about sessions this daemon drives.
+      if (action === 'open-in-desktop' && method === 'POST') {
+        const mirrored = this.mirrors.get(id);
+        const driven = this.sessions.get(id);
+        if (!mirrored && !driven) throw Object.assign(new Error('Session not found'), { status: 404 });
+        json(res, 200, await this.openInDesktop(driven ? driven.toJSON().claudeSessionId : id));
+        return;
+      }
+
       const session = this.sessions.get(id);
       if (!session) throw Object.assign(new Error('Session not found'), { status: 404 });
 
@@ -545,6 +604,9 @@ export class RemoteControlServer {
       if (action === 'effort' && method === 'POST') {
         const body = await readJsonBody(req);
         await session.setEffort(checkEffort(body.effort) || null);
+        // Sent alongside the level, because ultracode is not one — it is a
+        // keyword the agent looks for, and it has to be switchable off again.
+        if ('ultracode' in body) session.setUltracode(Boolean(body.ultracode));
         json(res, 200, { session: session.toJSON() });
         return;
       }
@@ -554,30 +616,6 @@ export class RemoteControlServer {
         json(res, 200, { session: session.toJSON() });
         return;
       }
-      // Claude Desktop cannot be told to start a conversation — it is a window,
-      // not a command. What it can do is import one: its own claude://resume
-      // handler calls importCliSession, and every session this daemon runs
-      // writes the same transcript a CLI session does. So the answer to "start
-      // one in Claude Desktop" is: start it here, then send it over.
-      if (action === 'open-in-desktop' && method === 'POST') {
-        if (process.platform !== 'darwin') {
-          throw Object.assign(new Error('Claude Desktop is macOS-only.'), { status: 400 });
-        }
-        const agentSession = session.toJSON().claudeSessionId;
-        if (!agentSession || !/^[0-9a-f-]{36}$/i.test(agentSession)) {
-          throw Object.assign(
-            new Error('This session has not been given an id yet — send it something first.'),
-            { status: 409 },
-          );
-        }
-        const { execFile } = await import('node:child_process');
-        const { promisify } = await import('node:util');
-        await promisify(execFile)('open', [`claude://resume?session=${agentSession}`], { timeout: 10000 });
-        log.info(`handed session ${agentSession} to Claude Desktop`);
-        json(res, 200, { opened: true });
-        return;
-      }
-
       const queuedMatch = action?.match(/^queue\/(.+)$/);
       if (queuedMatch && method === 'DELETE') {
         json(res, 200, { cancelled: session.cancelQueued(decodeURIComponent(queuedMatch[1])) });
@@ -761,7 +799,13 @@ export class RemoteControlServer {
 
     if (route === 'setup/default-cwd' && method === 'PUT') {
       const body = await readJsonBody(req);
-      const target = realPath(body.path || '');
+      // realPath('') resolves to the daemon's own working directory, so an
+      // empty body used to overwrite the saved project folder with wherever
+      // the daemon happened to be started from — silently, with a 200.
+      if (typeof body.path !== 'string' || !body.path.trim()) {
+        throw Object.assign(new Error('No folder given.'), { status: 400 });
+      }
+      const target = realPath(body.path);
       if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
         throw Object.assign(new Error(`Not a directory: ${target}`), { status: 400 });
       }

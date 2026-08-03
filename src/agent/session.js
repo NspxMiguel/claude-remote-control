@@ -173,7 +173,7 @@ function friendlyError(text, agent) {
  * a human, so all agents behave identically from the phone's point of view.
  */
 export class Session extends EventEmitter {
-  constructor({ config, id, cwd, model, permissionMode, effort, ultracode, resumeFrom, forkSession = true, title, driver }) {
+  constructor({ config, id, cwd, model, permissionMode, effort, ultracode, handToDesktop, resumeFrom, forkSession = true, title, driver }) {
     super();
     this.config = config;
     this.id = id || randomUUID();
@@ -192,6 +192,15 @@ export class Session extends EventEmitter {
      * than going into the driver's options, where there is nowhere to put it.
      */
     this.ultracode = Boolean(ultracode);
+    /**
+     * Hand this to Claude Desktop as soon as it has a transcript.
+     *
+     * Claude Desktop cannot be told to start a conversation, so "new session
+     * in Claude Desktop" means starting one here and importing it there. The
+     * import needs an id, and an id only exists once the agent has actually
+     * run, so this waits for that rather than failing at creation.
+     */
+    this.handToDesktop = Boolean(handToDesktop);
     this.resumeFrom = resumeFrom || null;
     this.forkSession = forkSession;
     this.title = title || null;
@@ -346,7 +355,13 @@ export class Session extends EventEmitter {
       // process per turn means the real init only lands with the first prompt.
       case 'ready':
       case 'init':
-        if (event.sessionId) this.agentSessionId = event.sessionId;
+        if (event.sessionId) {
+          this.agentSessionId = event.sessionId;
+          if (this.handToDesktop) {
+            this.handToDesktop = false;
+            this.emit('handToDesktop', event.sessionId);
+          }
+        }
         if (event.version) this.agentVersion = event.version;
         if (event.tools?.length) this.tools = event.tools;
         if (event.model) this.model = event.model;
@@ -591,6 +606,13 @@ export class Session extends EventEmitter {
       log.warn(`interrupt failed: ${err?.message}`);
       return false;
     }
+  }
+
+  /** Turn the keyword on or off for everything sent from here on. */
+  setUltracode(on) {
+    if (this.ultracode === Boolean(on)) return;
+    this.ultracode = Boolean(on);
+    this.emit('state', this.toJSON());
   }
 
   async setModel(model) {

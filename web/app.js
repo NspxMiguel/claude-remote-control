@@ -6,6 +6,7 @@ import { icon } from './icons.js';
 import { renderMarkdown } from './markdown.js';
 import {
   carryOverOpenState,
+  copyText,
   ensureGroupNode,
   insertByOrder,
   refreshGroup,
@@ -1131,11 +1132,13 @@ function renderMachines() {
   const here = currentOrigin();
 
   container.innerHTML = '';
-  container.hidden = machines.length < 2;
-  if (machines.length < 2) return;
+  container.hidden = false;
 
-  container.appendChild(el('h2', null, t('app.machines', 'Machines')));
-  for (const machine of machines) {
+  // The list of Macs is only worth showing once there is a choice — but the
+  // way to add the second one was inside that list, so with one Mac there was
+  // no way to reach it at all.
+  if (machines.length > 1) container.appendChild(el('h2', null, t('app.machines', 'Machines')));
+  for (const machine of machines.length > 1 ? machines : []) {
     const isHere = machine.origin === here;
     const row = el('button', `machine-row${isHere ? ' active' : ''}`);
     row.type = 'button';
@@ -1242,7 +1245,10 @@ function renderMirrorList() {
     : all;
 
   $('.drawer-search').hidden = !expanded;
-  $('#mirror-tools').hidden = !expanded;
+  // Not tied to expanding: with three conversations or fewer there is nothing
+  // to expand, so tying them together meant search and the rename button could
+  // never be reached at all.
+  $('#mirror-tools').hidden = !all.length;
   groups.innerHTML = '';
   list.innerHTML = '';
 
@@ -1980,10 +1986,23 @@ function renderAgentPicker() {
     select.appendChild(option);
   }
 
+  // Claude Desktop is a window, not a command: nothing in it takes an
+  // instruction to open a conversation. But it will import one. So the entry
+  // exists where you look for it, and what it does is start the session here
+  // and hand it over the moment the agent gives it a transcript.
+  const claudeCode = agents.find((a) => a.id === 'claude-code');
+  if (claudeCode?.available) {
+    const desktop = document.createElement('option');
+    desktop.value = 'claude-desktop';
+    desktop.textContent = 'Claude Desktop';
+    select.appendChild(desktop);
+  }
+
   const firstAvailable = agents.find((a) => a.available);
   if (firstAvailable) select.value = firstAvailable.id;
-  select.parentElement.querySelector('label[for=new-agent]').hidden = agents.length < 2;
-  select.hidden = agents.length < 2;
+  // Always visible: the choice of where the conversation ends up is the point.
+  select.parentElement.querySelector('label[for=new-agent]').hidden = false;
+  select.hidden = false;
   renderAgentNote();
 }
 
@@ -1991,7 +2010,19 @@ function renderAgentPicker() {
 function renderAgentNote() {
   const note = $('#agent-note');
   const agents = state.serverState?.agents || [];
-  const agent = agents.find((a) => a.id === $('#new-agent').value);
+  const chosen = $('#new-agent').value;
+  // The Claude Desktop entry runs Claude Code; everything about the agent is
+  // therefore Claude Code's.
+  const agent = agents.find((a) => a.id === (chosen === 'claude-desktop' ? 'claude-code' : chosen));
+
+  if (chosen === 'claude-desktop') {
+    $('#new-model').parentElement.hidden = false;
+    note.textContent = t(
+      'agent.desktopNote',
+      'Starts here and opens in Claude Desktop on your Mac as soon as it answers.',
+    );
+    return;
+  }
 
   // The model list here names Claude models; offering them for another agent
   // would send it a model it has never heard of, which is a hard error.
@@ -2530,7 +2561,6 @@ async function openSettings() {
     );
 
     renderAgentSettings(data.agents || []);
-    renderTestedOn(body);
   } catch (err) {
     body.appendChild(el('p', 'error', err.message));
   }
@@ -2588,6 +2618,18 @@ function openSessionOptions() {
   if (!session) return;
 
   const body = $('#opts-body');
+  // The three selects live outside this body and get moved into it as controls.
+  // Wiping the body destroyed them, so opening this sheet a second time threw
+  // and took the model, thinking, permission, take-over and end-session
+  // controls with it for the rest of the page's life. Put them back first.
+  const card = $('#opts-sheet .sheet-card');
+  for (const id of ['#opt-model', '#opt-effort', '#opt-perm']) {
+    const control = $(id);
+    if (control) {
+      control.hidden = true;
+      card.appendChild(control);
+    }
+  }
   body.innerHTML = '';
   const readOnly = Boolean(session.readOnly);
 
@@ -2655,12 +2697,14 @@ function openSessionOptions() {
     }
 
     const effortSelect = $('#opt-effort');
-    effortSelect.value = session.effort || '';
+    effortSelect.value = session.ultracode ? 'ultracode' : session.effort || '';
     effortSelect.hidden = false;
     controls.card.appendChild(
       row({
         name: t('session.thinking', 'Thinking'),
-        detail: EFFORT_LABELS[session.effort] || t('session.agentDefault', 'Agent default'),
+        detail: session.ultracode
+          ? 'Ultracode'
+          : EFFORT_LABELS[session.effort] || t('session.agentDefault', 'Agent default'),
         control: effortSelect,
       }),
     );
@@ -3078,7 +3122,10 @@ function wireUp() {
         method: 'POST',
         body: JSON.stringify({
           cwd,
-          agent: $('#new-agent').value || undefined,
+          // "Claude Desktop" is not a driver — it is Claude Code plus a
+          // hand-over, because that is the only way a conversation gets there.
+          agent: $('#new-agent').value === 'claude-desktop' ? 'claude-code' : $('#new-agent').value || undefined,
+          handToDesktop: $('#new-agent').value === 'claude-desktop',
           model: $('#new-model').parentElement.hidden ? undefined : $('#new-model').value,
           permissionMode: $('#new-perm').value,
           // Ultracode is not a thinking level — it is a word the agent looks
@@ -3118,9 +3165,16 @@ function wireUp() {
     const session = currentSession();
     if (!session) return;
     try {
+      const wantsUltra = event.target.value === 'ultracode';
       await api(`/api/sessions/${session.id}/effort`, {
         method: 'POST',
-        body: JSON.stringify({ effort: event.target.value || null }),
+        // Ultracode is a keyword, not a level — so it travels as its own flag
+        // and drags max thinking along. Picking any real level turns it off,
+        // which is the only way to switch it back off once it is on.
+        body: JSON.stringify({
+          effort: wantsUltra ? 'max' : event.target.value || null,
+          ultracode: wantsUltra,
+        }),
       });
     } catch (err) {
       toast(err.message);

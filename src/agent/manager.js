@@ -19,7 +19,7 @@ export class SessionManager extends EventEmitter {
     return this.sessions.get(id) || null;
   }
 
-  create({ cwd, model, permissionMode, effort, ultracode, resumeFrom, forkSession, title, driver } = {}) {
+  create({ cwd, model, permissionMode, effort, ultracode, handToDesktop, resumeFrom, forkSession, title, driver } = {}) {
     const limit = this.config.maxSessions ?? 8;
     if (this.sessions.size >= limit) {
       throw Object.assign(
@@ -43,12 +43,14 @@ export class SessionManager extends EventEmitter {
       permissionMode,
       effort,
       ultracode,
+      handToDesktop,
       resumeFrom,
       forkSession,
       title,
       driver,
     });
 
+    session.on('handToDesktop', (agentSessionId) => this.emit('handToDesktop', agentSessionId));
     session.on('patch', (patch) => this.emit('patch', { sessionId: session.id, patch }));
     session.on('state', (state) => this.emit('state', state));
     session.on('permission', (payload) => this.emit('permission', payload));
