@@ -1167,13 +1167,63 @@ function renderSessionList() {
   $('#live-empty').hidden = live.length > 0;
   for (const session of live) liveList.appendChild(sessionRow(session, false));
 
-  const mirrorList = $('#mirror-list');
-  mirrorList.innerHTML = '';
-  for (const transcript of state.mirrors) {
-    // Prefer the open mirror's live state when we have it.
-    const opened = state.sessions.get(transcript.id);
-    mirrorList.appendChild(sessionRow({ ...transcript, ...(opened || {}) }, true));
+  renderMirrorList();
+}
+
+/** How many conversations the list shows before you ask for the rest. */
+const RECENT_LIMIT = 3;
+
+/**
+ * The conversations already on this Mac.
+ *
+ * Closed, it is the three you touched last — which is nearly always the one
+ * you want, and a list of forty is not a list, it is a wall. Opened, it splits
+ * desktop from terminal and gains a search box, because at that point you are
+ * looking for something specific rather than picking up where you left off.
+ */
+function renderMirrorList() {
+  const query = (state.mirrorQuery || '').trim().toLowerCase();
+  const expanded = Boolean(state.mirrorExpanded || query);
+  const groups = $('#mirror-groups');
+  const list = $('#mirror-list');
+  const more = $('#mirror-more');
+
+  // Prefer the open mirror's live state over the transcript's summary.
+  const all = state.mirrors.map((t) => ({ ...t, ...(state.sessions.get(t.id) || {}) }));
+  const matches = query
+    ? all.filter((s) => `${s.title || ''} ${s.cwd || ''}`.toLowerCase().includes(query))
+    : all;
+
+  $('.drawer-search').hidden = !expanded;
+  $('#mirror-tools').hidden = !expanded;
+  groups.innerHTML = '';
+  list.innerHTML = '';
+
+  if (!expanded) {
+    for (const session of matches.slice(0, RECENT_LIMIT)) list.appendChild(sessionRow(session, true));
+    more.hidden = matches.length <= RECENT_LIMIT;
+    more.textContent = t('app.showAll', 'Show all {n}', { n: matches.length });
+    return;
   }
+
+  const buckets = [
+    { label: t('app.fromDesktop', 'Claude Desktop'), of: (s) => s.entrypoint === 'claude-desktop' },
+    { label: t('app.fromCli', 'Terminal'), of: (s) => s.entrypoint !== 'claude-desktop' },
+  ];
+  for (const bucket of buckets) {
+    const mine = matches.filter(bucket.of);
+    if (!mine.length) continue;
+    groups.appendChild(el('h3', 'group-label', bucket.label));
+    const sub = el('ul', 'session-list');
+    for (const session of mine) sub.appendChild(sessionRow(session, true));
+    groups.appendChild(sub);
+  }
+  if (!matches.length) {
+    groups.appendChild(el('p', 'muted small', t('app.noMatches', 'Nothing matches that.')));
+  }
+
+  more.hidden = false;
+  more.textContent = t('app.showFewer', 'Show fewer');
 }
 
 function sessionRow(session, isMirror) {
@@ -1289,9 +1339,7 @@ function renderHeader() {
   if (session.readOnly) bits.push(t('app.mirrored', 'mirrored'));
   $('#session-sub').textContent = bits.join(' · ');
 
-  const busy = session.status === 'busy';
-  $('#send').hidden = busy;
-  $('#stop').hidden = !busy;
+  updateComposerButtons();
 
   // A whole sentence does not fit in the composer's chip: it clipped off the
   // right edge and pushed the row an extra line tall. Long-form goes above.
@@ -1306,11 +1354,17 @@ function renderHeader() {
 
   const meta = $('#composer-meta');
   meta.innerHTML = '';
+  const queued = session.queued || 0;
   if (session.readOnly) {
     // the notice above says it
-  } else if (busy) {
+  } else if (session.status === 'busy') {
     meta.appendChild(el('span', 'spinner'));
-    meta.appendChild(el('span', null, t('app.working', '{agent} is working…', { agent: session.agentLabel || 'Claude' })));
+    const working = t('app.working', '{agent} is working…', { agent: session.agentLabel || 'Claude' });
+    meta.appendChild(
+      el('span', null, queued ? `${working} ${t('app.queuedCount', '· {n} queued', { n: queued })}` : working),
+    );
+  } else if (queued) {
+    meta.appendChild(el('span', null, t('app.queuedCount', '· {n} queued', { n: queued }).replace(/^·\s*/, '')));
   } else if (typeof session.totalCostUsd === 'number' && session.totalCostUsd > 0) {
     meta.appendChild(el('span', null, `$${session.totalCostUsd.toFixed(4)} this session`));
   }
@@ -1322,6 +1376,21 @@ function renderHeader() {
     $('#input').placeholder = t('app.composer.continue', 'Carry on from here…');
   }
   updateTabTitle();
+}
+
+/**
+ * Which of send and stop the composer shows.
+ *
+ * While the agent works, stop is the useful button — until you start typing,
+ * at which point the useful button is send again, because what you type goes
+ * in the queue rather than nowhere.
+ */
+function updateComposerButtons() {
+  const session = currentSession();
+  const busy = session?.status === 'busy';
+  const typing = Boolean($('#input').value.trim() || state.pending.length);
+  $('#send').hidden = busy && !typing;
+  $('#stop').hidden = !busy || typing;
 }
 
 /** Surface state in the tab title so a backgrounded desktop window still tells you. */
@@ -2595,6 +2664,44 @@ function wireUp() {
 
   wireScanner();
 
+  // The conversation list
+  $('#mirror-more').addEventListener('click', () => {
+    state.mirrorExpanded = !state.mirrorExpanded;
+    if (!state.mirrorExpanded) {
+      state.mirrorQuery = '';
+      $('#mirror-search').value = '';
+    }
+    renderMirrorList();
+    if (state.mirrorExpanded) $('#mirror-search').focus();
+  });
+
+  $('#mirror-search').addEventListener('input', (event) => {
+    state.mirrorQuery = event.target.value;
+    renderMirrorList();
+  });
+
+  $('#mirror-rename').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const was = button.textContent;
+    button.disabled = true;
+    button.textContent = t('app.tidying', 'Thinking of names…');
+    try {
+      const { renamed } = await api('/api/transcripts/rename', { method: 'POST' });
+      await refreshSessions();
+      renderMirrorList();
+      toast(
+        renamed
+          ? t('toast.renamed', '{n} renamed', { n: renamed })
+          : t('toast.renamedNone', 'They already read well enough.'),
+      );
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = was;
+    }
+  });
+
   // The guided setup
   $('#welcome-start').addEventListener('click', () => showStep('machine'));
   $('#welcome-skip').addEventListener('click', () => showStep('code'));
@@ -2682,6 +2789,18 @@ function wireUp() {
   $('#dictate').addEventListener('click', toggleDictation);
   // One listener for every speaker button, present and future.
   $('#feed').addEventListener('click', (event) => {
+    const remove = event.target.closest?.('[data-cancel-queued]');
+    if (remove) {
+      event.preventDefault();
+      const itemId = remove.dataset.cancelQueued;
+      remove.disabled = true;
+      api(`/api/sessions/${state.currentId}/queue/${encodeURIComponent(itemId)}`, { method: 'DELETE' })
+        .catch((err) => {
+          remove.disabled = false;
+          toast(err.message);
+        });
+      return;
+    }
     const button = event.target.closest?.('.speak-btn');
     if (!button) return;
     event.preventDefault();
@@ -2733,7 +2852,11 @@ function wireUp() {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, window.innerHeight * 0.4)}px`;
   };
-  input.addEventListener('input', autoGrow);
+  input.addEventListener('input', () => {
+    autoGrow();
+    // Typing while it works turns stop back into send: what you write queues.
+    updateComposerButtons();
+  });
   input.addEventListener('keydown', (event) => {
     // Enter sends on a physical keyboard; on touch it inserts a newline.
     const isDesktop = window.matchMedia('(min-width: 900px)').matches;
@@ -2783,6 +2906,7 @@ function wireUp() {
     state.pending = [];
     renderAttachments();
     autoGrow();
+    updateComposerButtons();
     scrollToBottom();
   });
 

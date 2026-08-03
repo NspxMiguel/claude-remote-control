@@ -5,13 +5,11 @@ struct ClaudeRemoteControlApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuPanelView()
-        } label: {
-            Image(nsImage: MenuBarIcon.prompt)
+        // The menu bar item is an NSStatusItem installed by the delegate — see
+        // StatusItemController for why it is not a MenuBarExtra any more. An
+        // App still needs a Scene, and Settings is the one that opens nothing.
+        Settings {
+            EmptyView()
         }
-        // .window rather than .menu: the panel holds a QR code, switches and a
-        // list of checks, none of which fit in an NSMenu.
-        .menuBarExtraStyle(.window)
     }
 }

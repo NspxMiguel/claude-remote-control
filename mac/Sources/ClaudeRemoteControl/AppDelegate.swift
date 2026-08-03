@@ -16,8 +16,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // build has no Info.plist and would otherwise take over the Dock.
         NSApp.setActivationPolicy(.accessory)
 
+        // Before anything that can be slow: an app whose icon shows up three
+        // seconds late reads as an app that did not launch.
+        StatusItemController.shared.install()
+
         AppSettings.shared.refreshLoginItemStatus()
         AppSettings.shared.applyAtLaunch()
+    }
+
+    /// Opening the app again when it is already running is what someone does
+    /// when they cannot find its icon. Show them the panel.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        StatusItemController.shared.showPanelWindow()
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {

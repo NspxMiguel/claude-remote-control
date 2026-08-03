@@ -202,6 +202,8 @@ export class Session extends EventEmitter {
 
     /** requestId -> { resolve, timer, item, payload } */
     this.pendingPermissions = new Map();
+    /** Messages typed while the agent was busy: { itemId, prompt, forDriver }. */
+    this.queue = [];
 
     /** Set while history is being replayed into the feed; see seedFrom. */
     this.replaying = false;
@@ -261,6 +263,8 @@ export class Session extends EventEmitter {
     this.status = status;
     this.lastActivityAt = Date.now();
     this.emit('state', this.toJSON());
+    // A turn finishing is the moment the next thing you typed can go.
+    if (status === 'idle') this.drainQueue();
   }
 
   toJSON() {
@@ -288,6 +292,7 @@ export class Session extends EventEmitter {
       availableModels: this.availableModels,
       lastError: this.lastError,
       feedLength: this.feed.seq,
+      queued: this.queue.length,
     };
   }
 
@@ -463,24 +468,87 @@ export class Session extends EventEmitter {
       forDriver = [];
     }
 
+    // Waiting to be sent, not dropped and not jammed into the middle of a turn.
+    // You get to type the next three things and put the phone down; the queue
+    // lives here rather than on the phone so locking it does not lose them.
+    const waiting = this.busy || this.status === 'starting';
+
     // The transcript carries thumbnails, never the full-size bytes: it is
     // replayed in full on every reconnect.
-    this.feed.append({
+    const item = this.feed.append({
       kind: 'user',
       text,
+      queued: waiting || undefined,
       attachments: attachments.length || undefined,
       thumbnails: attachments.map((a) => a.thumbnail).filter(Boolean),
     });
-    this.driver.send(prompt, forDriver);
-    this.setStatus('busy');
+
+    if (waiting) {
+      this.queue.push({ itemId: item.id, prompt, forDriver });
+      this.emit('state', this.toJSON());
+      return true;
+    }
+
+    this.deliver({ itemId: item.id, prompt, forDriver });
     return true;
+  }
+
+  /** Hand one message to the agent and mark it as no longer waiting. */
+  deliver(entry) {
+    const item = this.feed.items.find((i) => i.id === entry.itemId);
+    if (item?.queued) this.feed.update(item, { queued: undefined });
+    this.driver.send(entry.prompt, entry.forDriver);
+    this.setStatus('busy');
+  }
+
+  /** Send the next queued message, if the agent is free and there is one. */
+  drainQueue() {
+    if (this.busy || !this.queue.length) return;
+    const next = this.queue.shift();
+    this.deliver(next);
+    this.emit('state', this.toJSON());
+  }
+
+  /**
+   * Take a message back out of the queue. Only ever one that has not gone yet —
+   * there is no unsending, and pretending otherwise would be worse than the
+   * button not being there.
+   */
+  cancelQueued(itemId) {
+    const at = this.queue.findIndex((entry) => entry.itemId === itemId);
+    if (at === -1) return false;
+    this.queue.splice(at, 1);
+    const item = this.feed.items.find((i) => i.id === itemId);
+    if (item) this.feed.update(item, { queued: undefined, cancelled: true });
+    this.emit('state', this.toJSON());
+    return true;
+  }
+
+  /** Everything still waiting, for a client that just connected. */
+  clearQueue() {
+    if (!this.queue.length) return 0;
+    const dropped = this.queue.splice(0);
+    for (const entry of dropped) {
+      const item = this.feed.items.find((i) => i.id === entry.itemId);
+      if (item) this.feed.update(item, { queued: undefined, cancelled: true });
+    }
+    this.emit('state', this.toJSON());
+    return dropped.length;
   }
 
   async interrupt() {
     if (!this.capabilities.interrupt) return false;
     try {
       await this.driver.interrupt?.();
-      this.feed.append({ kind: 'system', text: 'Interrupted from remote' });
+      // Stopping means stopping. Letting the queue carry on would restart the
+      // agent a second after you told it to stop.
+      const dropped = this.clearQueue();
+      this.feed.append({
+        kind: 'system',
+        text: dropped
+          ? `Interrupted from remote — ${dropped} queued message${dropped === 1 ? '' : 's'} dropped`
+          : 'Interrupted from remote',
+      });
       this.setStatus('idle');
       return true;
     } catch (err) {

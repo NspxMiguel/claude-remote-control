@@ -236,7 +236,11 @@ class MirrorSession extends EventEmitter {
         if (meta.title) {
           if (meta.titleKind === 'custom') this.info.customTitle = meta.title;
           else this.info.aiTitle = meta.title;
-          this.info.title = this.info.customTitle || this.info.aiTitle || this.info.title;
+          // A name given in this app outranks both — otherwise replaying the
+          // transcript would quietly undo the rename a line later.
+          if (!this.info.titleOverridden) {
+            this.info.title = this.info.customTitle || this.info.aiTitle || this.info.title;
+          }
         }
         if (meta.model) this.info.model = meta.model;
         if (meta.cwd) this.info.cwd = meta.cwd;
@@ -338,12 +342,18 @@ export class MirrorStore extends EventEmitter {
     files.sort((a, b) => b.mtimeMs - a.mtimeMs);
     for (const { file } of files.slice(0, limit)) {
       try {
-        out.push(await describeTranscript(file));
+        out.push(this.withOverride(await describeTranscript(file)));
       } catch (err) {
         log.debug(`skipping ${file}: ${err?.message}`);
       }
     }
     return out;
+  }
+
+  /** A name you gave it here beats the one in the transcript. */
+  withOverride(info) {
+    const better = this.config.titleOverrides?.[info.id];
+    return better ? { ...info, title: better, titleOverridden: true } : info;
   }
 
   async findFile(sessionId) {
@@ -366,7 +376,7 @@ export class MirrorStore extends EventEmitter {
     const file = await this.findFile(sessionId);
     if (!file) throw Object.assign(new Error(`No transcript for session ${sessionId}`), { status: 404 });
 
-    const info = await describeTranscript(file);
+    const info = this.withOverride(await describeTranscript(file));
     const mirror = new MirrorSession(info, this.config);
     mirror.on('patch', (patch) => this.emit('patch', { sessionId, patch }));
     mirror.on('state', (state) => this.emit('state', state));

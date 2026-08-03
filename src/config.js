@@ -68,6 +68,14 @@ const DEFAULTS = {
   claudeExecutable: null,
   /** Path to Antigravity's `agy` binary, same idea. */
   antigravityExecutable: null,
+  /**
+   * Better names for conversations, by transcript id.
+   *
+   * Kept here rather than written into the transcript: that file belongs to
+   * Claude Code, and appending to it to change a label is not a trade worth
+   * making. The cost is that the tidier name only shows in this app.
+   */
+  titleOverrides: {},
   /** Keep this many feed items in memory per session. */
   maxFeedItems: 2000,
   /** Cap on concurrent live sessions — each one is a Claude Code process. */

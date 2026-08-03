@@ -553,6 +553,12 @@ export class RemoteControlServer {
         json(res, 200, { session: session.toJSON() });
         return;
       }
+      const queuedMatch = action?.match(/^queue\/(.+)$/);
+      if (queuedMatch && method === 'DELETE') {
+        json(res, 200, { cancelled: session.cancelQueued(decodeURIComponent(queuedMatch[1])) });
+        return;
+      }
+
       if (action === 'permission' && method === 'POST') {
         const body = await readJsonBody(req);
         const ok = session.decidePermission(body.requestId, body);
@@ -565,6 +571,38 @@ export class RemoteControlServer {
     if (route === 'transcripts' && method === 'GET') {
       const list = await this.mirrors.list({ limit: Number(url.searchParams.get('limit') || 60) });
       json(res, 200, { transcripts: list });
+      return;
+    }
+
+    // Better names for the conversations whose own name is a wall of text.
+    if (route === 'transcripts/rename' && method === 'POST') {
+      const { suggestTitles, MAX_BATCH } = await import('./rename.js');
+      const list = await this.mirrors.list({ limit: 60 });
+
+      // Only the ones that need it: a conversation Claude Code already named
+      // reads fine, and asking for a new name would just churn the sidebar.
+      const needy = list
+        .filter((t) => !t.titleOverridden && !t.customTitle && !t.aiTitle && t.preview)
+        .slice(0, MAX_BATCH);
+      if (!needy.length) {
+        json(res, 200, { renamed: 0, considered: 0 });
+        return;
+      }
+
+      const titles = await suggestTitles(this.config, needy);
+      if (Object.keys(titles).length) {
+        this.config.titleOverrides = { ...this.config.titleOverrides, ...titles };
+        saveConfig(this.config);
+        // A mirror already open is holding the old name.
+        for (const [id, title] of Object.entries(titles)) {
+          const mirror = this.mirrors.get(id);
+          if (!mirror) continue;
+          mirror.info.title = title;
+          mirror.info.titleOverridden = true;
+          this.broadcast({ t: 'session', session: mirror.toJSON() });
+        }
+      }
+      json(res, 200, { renamed: Object.keys(titles).length, considered: needy.length });
       return;
     }
 

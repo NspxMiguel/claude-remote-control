@@ -185,7 +185,16 @@
       <section>
         <h2 data-i18n="app.onThisMachine">On this machine</h2>
         <p class="muted small" data-i18n="app.mirrorNote">Sessions from Claude Desktop and the CLI. Watch live, then take over.</p>
+        <label class="drawer-search" hidden>
+          <input id="mirror-search" type="search" autocomplete="off" spellcheck="false"
+                 placeholder="Search conversations" data-i18n-placeholder="app.search" />
+        </label>
+        <div id="mirror-tools" hidden>
+          <button id="mirror-rename" class="ghost-btn wide small" data-i18n="app.tidyNames">Tidy names with AI</button>
+        </div>
+        <div id="mirror-groups"></div>
         <ul id="mirror-list" class="session-list"></ul>
+        <button id="mirror-more" class="ghost-btn wide small" hidden></button>
       </section>
     </nav>
 

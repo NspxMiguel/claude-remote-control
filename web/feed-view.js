@@ -187,7 +187,9 @@ export function refreshGroup(group) {
 export function renderItem(item) {
   switch (item.kind) {
     case 'user': {
-      const bubble = el('div', 'item bubble-user');
+      // Taken back out of the queue before it went. Nothing to show.
+      if (item.cancelled) return null;
+      const bubble = el('div', `item bubble-user${item.queued ? ' queued' : ''}`);
       // Show what was sent, not a count of it. Tapping opens it full size.
       if (item.thumbnails?.length) {
         const strip = el('div', 'bubble-images');
@@ -211,6 +213,16 @@ export function renderItem(item) {
         );
       }
       if (item.text) bubble.appendChild(el('div', 'bubble-text', item.text));
+      // Waiting its turn, and takeable back until it goes.
+      if (item.queued) {
+        const foot = el('div', 'bubble-queued');
+        foot.appendChild(el('span', null, 'In queue'));
+        const cancel = el('button', 'queued-cancel', 'Remove');
+        cancel.type = 'button';
+        cancel.dataset.cancelQueued = item.id;
+        foot.appendChild(cancel);
+        bubble.appendChild(foot);
+      }
       return withMeta(bubble, item);
     }
 
