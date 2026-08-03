@@ -168,12 +168,11 @@
         <strong>Remote Control</strong>
       </div>
       <button id="open-settings-top" class="icon-btn" aria-label="Settings" title="Settings" data-icon="gear"></button>
+      <button id="new-session" class="new-session" aria-label="New session" data-i18n-aria="app.newSession">
+        <span class="plus">+</span>
+      </button>
       <button id="drawer-close" class="icon-btn" aria-label="Close menu" data-icon="close"></button>
     </header>
-
-    <button id="new-session" class="new-session" aria-label="New session" data-i18n-aria="app.newSession">
-      <span class="plus">+</span>
-    </button>
 
     <nav class="session-groups">
       <section id="machines" class="machines" hidden></section>
@@ -189,11 +188,11 @@
           <input id="mirror-search" type="search" autocomplete="off" spellcheck="false"
                  placeholder="Search conversations" data-i18n-placeholder="app.search" />
         </label>
+        <div class="origin-filter">
+          <button id="filter-desktop" type="button" class="origin-chip" data-i18n="app.desktopShort">Desktop</button>
+          <button id="filter-cli" type="button" class="origin-chip" data-i18n="app.cliShort">Terminal</button>
+        </div>
         <div id="mirror-tools" hidden>
-          <div class="origin-filter">
-            <button id="filter-desktop" type="button" class="origin-chip" data-i18n="app.fromDesktop">Claude Desktop</button>
-            <button id="filter-cli" type="button" class="origin-chip" data-i18n="app.fromCli">Terminal</button>
-          </div>
           <button id="mirror-rename" class="ghost-btn wide small" data-i18n="app.tidyNames">Tidy names with AI</button>
         </div>
         <div id="mirror-groups"></div>
@@ -203,7 +202,6 @@
     </nav>
 
     <footer class="drawer-foot">
-      <button id="open-settings" class="ghost-btn" data-i18n="app.settings">Settings &amp; devices</button>
       <span id="conn-state" class="conn"><i></i> connecting</span>
     </footer>
   </aside>
@@ -317,6 +315,7 @@
           <option value="high">High</option>
           <option value="xhigh">Extra high</option>
           <option value="max">Max</option>
+          <option value="ultracode">Ultracode</option>
         </select>
       </div>
       <div>

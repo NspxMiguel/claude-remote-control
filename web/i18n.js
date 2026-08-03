@@ -79,6 +79,8 @@ const DICTIONARY = {
     'app.showAll': 'Ver todas as {n}',
     'app.showFewer': 'Ver menos',
     'app.fromDesktop': 'Claude Desktop',
+    'app.desktopShort': 'Desktop',
+    'app.cliShort': 'Terminal',
     'app.fromCli': 'Terminal',
     'app.noMatches': 'Nada bate com isso.',
     'app.queuedCount': '· {n} na fila',

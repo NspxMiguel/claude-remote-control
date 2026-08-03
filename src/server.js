@@ -477,6 +477,7 @@ export class RemoteControlServer {
         model: body.model,
         permissionMode: checkPermissionMode(body.permissionMode),
         effort: checkEffort(body.effort),
+        ultracode: Boolean(body.ultracode),
         resumeFrom: body.resumeFrom,
         forkSession: body.forkSession !== false,
         title: body.title,

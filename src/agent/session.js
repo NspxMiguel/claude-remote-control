@@ -173,7 +173,7 @@ function friendlyError(text, agent) {
  * a human, so all agents behave identically from the phone's point of view.
  */
 export class Session extends EventEmitter {
-  constructor({ config, id, cwd, model, permissionMode, effort, resumeFrom, forkSession = true, title, driver }) {
+  constructor({ config, id, cwd, model, permissionMode, effort, ultracode, resumeFrom, forkSession = true, title, driver }) {
     super();
     this.config = config;
     this.id = id || randomUUID();
@@ -185,6 +185,13 @@ export class Session extends EventEmitter {
     this.model = model || (this.driverId === DEFAULT_DRIVER ? config.defaultModel : null);
     this.permissionMode = permissionMode || config.defaultPermissionMode;
     this.effort = effort || config.defaultEffort || null;
+    /**
+     * Ultracode is not a thinking level, whatever the picker implies. It is a
+     * word the agent looks for in what you write, and finding it turns one
+     * agent into a fan-out of them. So it rides along with every prompt rather
+     * than going into the driver's options, where there is nowhere to put it.
+     */
+    this.ultracode = Boolean(ultracode);
     this.resumeFrom = resumeFrom || null;
     this.forkSession = forkSession;
     this.title = title || null;
@@ -279,6 +286,7 @@ export class Session extends EventEmitter {
       model: this.model,
       permissionMode: this.permissionMode,
       effort: this.effort,
+      ultracode: this.ultracode,
       status: this.status,
       claudeSessionId: this.agentSessionId,
       agentSessionId: this.agentSessionId,
@@ -314,6 +322,16 @@ export class Session extends EventEmitter {
     log.error(`session ${this.id} failed:`, message);
     this.lastError = message;
     this.feed.append({ kind: 'error', text: message });
+    // Anything still waiting is never going to be sent, and a message that sits
+    // marked "in queue" forever is worse than one that says it did not go: the
+    // first looks like the app is working.
+    const dropped = this.clearQueue();
+    if (dropped) {
+      this.feed.append({
+        kind: 'system',
+        text: `${dropped} message${dropped === 1 ? '' : 's'} never sent — the session did not start.`,
+      });
+    }
     this.setStatus('error');
     this.rejectAllPermissions('Session ended');
   }
@@ -420,11 +438,21 @@ export class Session extends EventEmitter {
         break;
       }
 
-      case 'ended':
+      case 'ended': {
         this.feed.finishStreamingText();
+        // Same as failing: a queue with nothing left to drain it would sit
+        // there claiming the messages are on their way.
+        const stranded = this.clearQueue();
+        if (stranded) {
+          this.feed.append({
+            kind: 'system',
+            text: `${stranded} message${stranded === 1 ? '' : 's'} never sent — the session ended.`,
+          });
+        }
         if (this.status !== 'error') this.setStatus('ended');
         this.rejectAllPermissions('Session ended');
         break;
+      }
 
       default:
         log.debug(`session ${this.id}: unhandled driver event ${event.type}`);
@@ -497,7 +525,10 @@ export class Session extends EventEmitter {
   deliver(entry) {
     const item = this.feed.items.find((i) => i.id === entry.itemId);
     if (item?.queued) this.feed.update(item, { queued: undefined });
-    this.driver.send(entry.prompt, entry.forDriver);
+    // Appended rather than prefixed: the keyword is a switch, and what you
+    // actually asked for should still be the first thing read.
+    const prompt = this.ultracode ? `${entry.prompt}\n\nultracode` : entry.prompt;
+    this.driver.send(prompt, entry.forDriver);
     this.setStatus('busy');
   }
 

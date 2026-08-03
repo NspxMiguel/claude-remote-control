@@ -142,3 +142,55 @@ describe('the queue', () => {
     assert.deepEqual(sent, ['early']);
   });
 });
+
+describe('a queue with nowhere to go', () => {
+  test('failing to start releases what was waiting, and says so', () => {
+    const s = session();
+    s.send('one');
+    s.send('two');
+    s.send('three');
+    assert.equal(s.queue.length, 2);
+
+    s.fail('Not logged in · Please run /login');
+
+    assert.equal(s.queue.length, 0, 'nothing is left claiming to be on its way');
+    assert.equal(s.toJSON().queued, 0);
+    for (const item of s.feed.items.filter((i) => i.kind === 'user')) {
+      assert.notEqual(item.queued, true);
+    }
+    assert.match(s.feed.items.at(-1).text, /2 messages never sent/);
+  });
+
+  test('a session that ends does the same', () => {
+    const s = session();
+    s.send('one');
+    s.send('two');
+
+    s.handleEvent({ type: 'ended' });
+
+    assert.equal(s.queue.length, 0);
+    assert.match(s.feed.items.at(-1).text, /1 message never sent/);
+  });
+});
+
+describe('ultracode', () => {
+  test('rides along with every prompt, not just the first', () => {
+    sent.length = 0;
+    const s = new Session({ config, cwd: WORK, driver: 'stub', ultracode: true });
+    s.setStatus('idle');
+
+    s.send('build the thing');
+    s.setStatus('idle');
+    s.send('now the other thing');
+
+    assert.deepEqual(sent, ['build the thing\n\nultracode', 'now the other thing\n\nultracode']);
+    assert.equal(s.toJSON().ultracode, true);
+  });
+
+  test('is off unless asked for, and what you wrote comes first', () => {
+    const s = session();
+    s.send('plain');
+    assert.deepEqual(sent, ['plain']);
+    assert.equal(s.toJSON().ultracode, false);
+  });
+});

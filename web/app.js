@@ -3079,7 +3079,12 @@ function wireUp() {
           agent: $('#new-agent').value || undefined,
           model: $('#new-model').parentElement.hidden ? undefined : $('#new-model').value,
           permissionMode: $('#new-perm').value,
-          effort: $('#new-effort').value || undefined,
+          // Ultracode is not a thinking level — it is a word the agent looks
+          // for in what you write, which turns one agent into a fan-out of
+          // them. It sits in this list because that is where you go looking
+          // for it, and it brings max thinking along with it.
+          effort: $('#new-effort').value === 'ultracode' ? 'max' : $('#new-effort').value || undefined,
+          ultracode: $('#new-effort').value === 'ultracode',
         }),
       });
       state.sessions.set(session.id, session);
@@ -3198,7 +3203,6 @@ function wireUp() {
   // Three ways in, because one of them was the bottom of a drawer nobody
   // scrolled to: the gear in the drawer header, the row in the session sheet,
   // and the original footer button.
-  $('#open-settings').addEventListener('click', openSettings);
   $('#open-settings-top').addEventListener('click', () => {
     closeDrawer();
     openSettings();

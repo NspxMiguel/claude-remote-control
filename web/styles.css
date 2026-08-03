@@ -387,10 +387,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 
 /* The drawer head is a display line, not a title bar. */
 .drawer-head {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; gap: var(--s2);
   padding: var(--s4) var(--s3) var(--s5) var(--s6);
   border-bottom: none;
 }
+/* The name takes the room; the buttons sit in a row after it. They used to
+ * fight for the same corner — the gear was laid out here and the new-session
+ * button was positioned absolutely on top of it, so settings was a control
+ * you could see in the DOM and never once hit. */
+.drawer-head .brand { flex: 1; min-width: 0; }
 .drawer-head .brand strong {
   font-family: var(--serif);
   font-size: 24px; font-weight: 400; letter-spacing: -.02em;
@@ -399,7 +404,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 
 /* "New session" is a filled circle at the top right, not a wide bar. */
 .new-session {
-  position: absolute; top: calc(var(--safe-top) + var(--s3)); right: var(--s3);
+  flex: none;
   margin: 0;
   width: 40px; height: 40px; padding: 0;
   border-radius: 50%;
@@ -487,6 +492,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   padding: var(--s3) var(--s6) 0;
   display: flex; align-items: center; gap: var(--s3);
 }
+/* A round button with font-size 0 and nothing inside it is a blank circle,
+ * which is exactly what this was. It carries the gear now. */
 .drawer-foot .ghost-btn {
   order: 2; flex: none;
   width: 34px; height: 34px; min-height: 34px; padding: 0;
@@ -494,6 +501,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   background: var(--bg-raise);
   color: var(--text-dim);
   font-size: 0;
+  display: grid; place-items: center;
 }
 .conn { order: 1; flex: 1; font-size: var(--t-small); color: var(--text-faint); display: flex; align-items: center; gap: var(--s2); }
 .conn i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); animation: pulse 1.6s var(--ease-out) infinite; }
@@ -1915,7 +1923,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .thinking[open] .thinking-peek { display: none; }
 
 /* Switch a whole origin out of the list — Claude Desktop or the terminal. */
-.origin-filter { display: flex; gap: var(--s2); margin-bottom: var(--s3); }
+.origin-filter { display: flex; gap: var(--s2); margin: 0 var(--s4) var(--s3); }
 .origin-chip {
   flex: 1 1 0; min-width: 0;
   min-height: 34px;

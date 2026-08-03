@@ -19,7 +19,7 @@ export class SessionManager extends EventEmitter {
     return this.sessions.get(id) || null;
   }
 
-  create({ cwd, model, permissionMode, resumeFrom, forkSession, title, driver } = {}) {
+  create({ cwd, model, permissionMode, effort, ultracode, resumeFrom, forkSession, title, driver } = {}) {
     const limit = this.config.maxSessions ?? 8;
     if (this.sessions.size >= limit) {
       throw Object.assign(
@@ -41,6 +41,8 @@ export class SessionManager extends EventEmitter {
       cwd: dir,
       model,
       permissionMode,
+      effort,
+      ultracode,
       resumeFrom,
       forkSession,
       title,
