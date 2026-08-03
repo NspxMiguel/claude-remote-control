@@ -115,10 +115,190 @@ function defaultDeviceName() {
  * has to be told which of its two routes this browser allows, and forgetting
  * that on one of the paths leaves a button with no explanation under it.
  */
-function showGate() {
+function showGate(step) {
   $('#app').hidden = true;
   $('#gate').hidden = false;
+  // The three-step ritual is for the first time only. Coming back — revoked,
+  // unpaired, a token that stopped working — you already know what this screen
+  // is, so it opens on the one thing left to do.
+  const seen = localStorage.getItem(SETUP_SEEN_KEY);
+  showStep(step || (seen ? 'code' : 'welcome'));
   prepareScanner();
+}
+
+const SETUP_SEEN_KEY = 'crc.setupSeen';
+const GATE_STEPS = ['welcome', 'machine', 'code', 'project'];
+
+/** One step on screen at a time. */
+function showStep(name) {
+  for (const step of GATE_STEPS) $(`#step-${step}`).hidden = step !== name;
+  $('#gate').scrollTop = 0;
+  if (name === 'machine') runMachineChecks();
+  if (name === 'project') renderProjectStep();
+  if (name !== 'welcome') localStorage.setItem(SETUP_SEEN_KEY, '1');
+}
+
+const pause = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ms));
+
+/** One row of the step-1 checklist, born waiting. */
+function taskRow({ title, note }) {
+  const row = el('div', 'setup-task pending');
+  const mark = el('span', 'setup-mark');
+  mark.appendChild(el('span', 'waiting'));
+  const text = el('div', 'setup-task-text');
+  text.appendChild(el('strong', null, title));
+  text.appendChild(el('span', null, note || ''));
+  row.append(mark, text);
+  return row;
+}
+
+function settleTaskRow(row, { note, snag }) {
+  row.classList.remove('pending');
+  const mark = row.querySelector('.setup-mark');
+  mark.innerHTML = '';
+  const badge = el('span', snag ? 'snag' : 'done');
+  badge.appendChild(icon(snag ? 'close' : 'check', { size: 14, stroke: 2.2 }));
+  mark.appendChild(badge);
+  if (note) row.querySelector('.setup-task-text span').textContent = note;
+}
+
+/** How this phone got here, in words. */
+function networkNote(hello) {
+  const host = location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') return t('setup.netLocal', 'on this Mac');
+  if (/^100\./.test(host) || /\.ts\.net$/.test(host)) return t('setup.netTailnet', 'over Tailscale');
+  if (hello.tailscale) return t('setup.netLanTs', 'local network — Tailscale also up');
+  return t('setup.netLan', 'local network');
+}
+
+/**
+ * Step 1. Everything on it is something this phone can genuinely check without
+ * a token: that the daemon answers here, how it was reached, and whether the
+ * agent behind it is signed in. That last one is the one that bites — a paired
+ * phone talking to an agent with no login looks like a broken app.
+ */
+async function runMachineChecks() {
+  const list = $('#machine-tasks');
+  const bar = $('#machine-progress');
+  const wait = $('#machine-wait');
+
+  list.innerHTML = '';
+  bar.style.width = '0%';
+  $('#machine-next').hidden = true;
+  $('#machine-retry').hidden = true;
+  wait.hidden = false;
+  wait.textContent = t('setup.waiting', 'Waiting for the daemon…');
+
+  let hello;
+  try {
+    const res = await fetch('/api/hello', { cache: 'no-store' });
+    if (!res.ok) throw new Error('unreachable');
+    hello = await res.json();
+  } catch {
+    wait.textContent = t('setup.noDaemon', 'This address is not answering.');
+    $('#machine-retry').hidden = false;
+    return;
+  }
+
+  const rows = [
+    { title: t('setup.mac', 'Your Mac'), note: hello.hostname },
+    { title: t('setup.network', 'Network'), note: networkNote(hello) },
+    {
+      title: t('setup.daemon', 'crc daemon'),
+      note: t('setup.listening', 'port {port} · v{version}', { port: hello.port, version: hello.version }),
+    },
+    // One row per agent rather than a summary: "an agent is ready" would hide
+    // the case that actually bites, which is the one you meant to use being
+    // the one that is not signed in.
+    ...(hello.agents || []).map((agent) => ({
+      title: agent.label,
+      note: agent.available
+        ? t('setup.agentReady', 'signed in')
+        : t('setup.agentNone', 'not signed in — fix it in Settings after pairing'),
+      snag: !agent.available,
+    })),
+  ];
+
+  for (const row of rows) list.appendChild(taskRow(row));
+  // Settled one at a time: the ritual the design draws, over facts that were
+  // all fetched in a single request.
+  for (const [i, row] of rows.entries()) {
+    await pause(i === 0 ? 240 : 420);
+    settleTaskRow(list.children[i], row);
+    bar.style.width = `${((i + 1) / rows.length) * 100}%`;
+  }
+
+  wait.hidden = true;
+  $('#machine-next').hidden = false;
+}
+
+/**
+ * Step 3, after pairing: which folder the work happens in. The subfolders of
+ * the machine's default projects folder are the answer nine times out of ten,
+ * so they are offered as cards; anything else goes through the full picker.
+ */
+async function renderProjectStep() {
+  const list = $('#project-list');
+  list.innerHTML = '';
+  state.chosenProject = null;
+
+  let root;
+  try {
+    const setup = await api('/api/setup');
+    // Offering the subfolders of the home directory means offering Library and
+    // Movies, which is nobody's project. The daemon already knows the places
+    // code actually lives; the last suggestion is always home, so it is only
+    // used when nothing better exists.
+    const suggested = setup.suggestedRoots || [];
+    const home = suggested[suggested.length - 1];
+    root = setup.defaultCwd && setup.defaultCwd !== home ? setup.defaultCwd : suggested[0] || setup.defaultCwd;
+    state.projectRoot = root;
+  } catch {
+    return; // Browse still works; there is just nothing to suggest.
+  }
+
+  let dirs = [];
+  try {
+    ({ dirs } = await api(`/api/fs?path=${encodeURIComponent(root)}`));
+  } catch {
+    /* an unreadable folder is not worth failing setup over */
+  }
+
+  const candidates = [
+    { name: root.split('/').pop() || root, path: root },
+    ...dirs.slice(0, 6),
+  ];
+  for (const dir of candidates) {
+    const row = el('button', 'project-row');
+    row.type = 'button';
+    row.dataset.path = dir.path;
+    const mark = el('span', 'project-icon');
+    mark.appendChild(icon('folder', { size: 18 }));
+    const text = el('div', 'project-text');
+    text.appendChild(el('strong', null, dir.name));
+    text.appendChild(el('span', null, prettyPath(dir.path)));
+    row.append(mark, text);
+    row.addEventListener('click', () => selectProject(dir.path));
+    list.appendChild(row);
+  }
+  selectProject(root);
+}
+
+function selectProject(path) {
+  state.chosenProject = path;
+  for (const row of $('#project-list').children) {
+    const selected = row.dataset.path === path;
+    row.classList.toggle('selected', selected);
+    const check = row.querySelector('.project-check');
+    if (selected && !check) {
+      const tick = el('span', 'project-check');
+      tick.appendChild(icon('check', { size: 19, stroke: 2.1 }));
+      row.appendChild(tick);
+    } else if (!selected && check) {
+      check.remove();
+    }
+  }
 }
 
 function unpair(silent) {
@@ -363,7 +543,11 @@ async function handleScan(text) {
 
   try {
     await pair(result.kind === 'code' ? result.code : result.token, $('#pair-name').value);
-    await enterApp({ paired: true });
+    // Not just hiding the sheet: the camera keeps running until it is stopped,
+    // and a live camera behind a pairing screen is the kind of thing a phone
+    // shows an orange dot for.
+    closeScanner();
+    showStep('project');
     return true;
   } catch (err) {
     const errorNode = $('#pair-error');
@@ -1676,9 +1860,17 @@ async function openDefaultFolderPicker(startPath) {
   }
 }
 
-/** Leave the folder picker and put Settings back where it was. */
+/**
+ * Leave the folder picker and go back where it was opened from — Settings for
+ * the setting, the setup step for the setup step. Reopening Settings from the
+ * setup screen would put the whole app behind a sheet you never asked for.
+ */
 function closeFolderPicker() {
   $('#folder-sheet').hidden = true;
+  if (state.folderPickerReturn === 'setup') {
+    state.folderPickerReturn = null;
+    return;
+  }
   openSettings();
 }
 
@@ -2287,7 +2479,7 @@ function wireUp() {
     if (code.length < 6) return;
     try {
       await pair(code, $('#pair-name').value);
-      await enterApp();
+      showStep('project');
     } catch (err) {
       errorNode.textContent = err.message;
       errorNode.hidden = false;
@@ -2301,7 +2493,7 @@ function wireUp() {
     errorNode.hidden = true;
     try {
       await pair($('#pair-token').value.trim(), $('#pair-name').value);
-      await enterApp();
+      showStep('project');
     } catch (err) {
       errorNode.textContent = err.message;
       errorNode.hidden = false;
@@ -2310,12 +2502,71 @@ function wireUp() {
 
   wireScanner();
 
+  // The guided setup
+  $('#welcome-start').addEventListener('click', () => showStep('machine'));
+  $('#welcome-skip').addEventListener('click', () => showStep('code'));
+  $('#machine-next').addEventListener('click', () => showStep('code'));
+  $('#machine-retry').addEventListener('click', runMachineChecks);
+
+  $('#project-browse').addEventListener('click', async () => {
+    state.folderPickerReturn = 'setup';
+    $('#folder-sheet').hidden = false;
+    try {
+      await openPicker(state.chosenProject || state.projectRoot || '~', {
+        list: '#folder-list',
+        path: '#folder-path',
+      });
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $('#project-skip').addEventListener('click', () => enterApp());
+
+  $('#project-go').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      if (state.chosenProject) {
+        await api('/api/setup/default-cwd', { method: 'PUT', body: JSON.stringify({ path: state.chosenProject }) });
+      }
+      await enterApp();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   // Project folder
   $('#folder-close').addEventListener('click', closeFolderPicker);
   $('#folder-use').addEventListener('click', async (event) => {
     const chosen = $('#folder-path').dataset.path;
     if (!chosen) return;
     const button = event.currentTarget;
+
+    // During setup nothing is saved until Continue, so this only records the
+    // choice and puts the folder in the list as the selected card.
+    if (state.folderPickerReturn === 'setup') {
+      closeFolderPicker();
+      const list = $('#project-list');
+      if (![...list.children].some((row) => row.dataset.path === chosen)) {
+        const row = el('button', 'project-row');
+        row.type = 'button';
+        row.dataset.path = chosen;
+        const mark = el('span', 'project-icon');
+        mark.appendChild(icon('folder', { size: 18 }));
+        const text = el('div', 'project-text');
+        text.appendChild(el('strong', null, chosen.split('/').pop() || chosen));
+        text.appendChild(el('span', null, prettyPath(chosen)));
+        row.append(mark, text);
+        row.addEventListener('click', () => selectProject(chosen));
+        list.appendChild(row);
+      }
+      selectProject(chosen);
+      return;
+    }
+
     button.disabled = true;
     try {
       await api('/api/setup/default-cwd', { method: 'PUT', body: JSON.stringify({ path: chosen }) });
@@ -2818,6 +3069,14 @@ async function main() {
   if (!(await daemonReachable())) {
     $('#app').hidden = false;
     showUnreachable();
+    return;
+  }
+
+  // Arriving on a pairing link — scanned with the phone's own camera app —
+  // skips the first two steps but should still land on the one that asks
+  // where the work happens.
+  if (justPaired && !localStorage.getItem(SETUP_SEEN_KEY)) {
+    showGate('project');
     return;
   }
 

@@ -18,8 +18,35 @@ export const LANGUAGES = [
 
 const DICTIONARY = {
   pt: {
+    // --- guided setup ---
+    'welcome.title': 'Sua máquina, no bolso',
+    'welcome.sub': 'Um minuto pra conferir o Mac e parear este aparelho. Depois é só conversar.',
+    'welcome.start': 'Começar',
+    'welcome.have': 'Já tenho um código',
+    'setup.step1': 'Passo 1 de 3',
+    'setup.title1': 'Conferindo o seu Mac',
+    'setup.toPair': 'Parear este aparelho',
+    'setup.waiting': 'Falando com o daemon…',
+    'setup.noDaemon': 'Este endereço não responde.',
+    'setup.mac': 'Seu Mac',
+    'setup.network': 'Rede',
+    'setup.daemon': 'Daemon crc',
+    'setup.listening': 'porta {port} · v{version}',
+    'setup.agentReady': 'conectado',
+    'setup.agentNone': 'não conectado — resolva nos Ajustes depois de parear',
+    'setup.netLocal': 'neste Mac',
+    'setup.netTailnet': 'pelo Tailscale',
+    'setup.netLan': 'rede local',
+    'setup.netLanTs': 'rede local — Tailscale também no ar',
+    'setup.step3': 'Passo 3 de 3',
+    'setup.title3': 'Escolha um projeto',
+    'setup.sub3': 'É daqui que as sessões novas começam. Dá pra mudar depois, ou escolher outra pasta na hora.',
+    'setup.browse': 'Outra pasta…',
+    'setup.continue': 'Continuar',
+    'setup.later': 'Decido depois',
+
     // --- pairing ---
-    'gate.step': 'Passo 1 de 3',
+    'gate.step': 'Passo 2 de 3',
     'gate.title': 'O código na sua tela',
     'gate.noCode': 'Sem código na tela?',
     'gate.tokenLabel': 'Ou cole o token principal',

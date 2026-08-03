@@ -325,6 +325,29 @@ export class RemoteControlServer {
     return identity;
   }
 
+  /** The unauthenticated readiness summary, recomputed at most every 15s. */
+  async hello() {
+    const now = Date.now();
+    if (this.helloCache && now - this.helloCache.at < 15_000) return this.helloCache.value;
+
+    const [{ tailscale, localOnly }, { detectDrivers }] = await Promise.all([
+      reachableUrls(this.config.port, this.config.host),
+      import('./agent/drivers/index.js'),
+    ]);
+    const agents = await detectDrivers(this.config);
+    const value = {
+      ok: true,
+      version: PKG.version,
+      hostname: os.hostname(),
+      port: this.config.port,
+      tailscale: Boolean(tailscale?.running),
+      localOnly: Boolean(localOnly),
+      agents: agents.map(({ id, label, available }) => ({ id, label, available })),
+    };
+    this.helloCache = { at: now, value };
+    return value;
+  }
+
   async handleApi(req, res, url) {
     const route = url.pathname.slice(5);
     const method = req.method;
@@ -358,6 +381,16 @@ export class RemoteControlServer {
 
     if (route === 'health' && method === 'GET') {
       json(res, 200, { ok: true, version: PKG.version });
+      return;
+    }
+
+    // What the setup screen shows before anyone has a token: enough to tell
+    // someone their Mac is ready, and nothing a stranger on the network could
+    // use. No detail strings — those carry paths and the signed-in address —
+    // and no device list. Answered from a short cache so an unauthenticated
+    // route cannot be used to make this Mac run driver probes in a loop.
+    if (route === 'hello' && method === 'GET') {
+      json(res, 200, await this.hello());
       return;
     }
 

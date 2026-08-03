@@ -16,20 +16,42 @@
 </head>
 <body>
 
-<!-- Pairing gate ------------------------------------------------------------->
+<!-- Guided setup: welcome, the machine, the code, the project ----------------->
 <div id="gate" class="gate" hidden>
   <div class="gate-card">
+
+  <!-- Welcome ------------------------------------------------------------->
+  <section id="step-welcome" class="gate-step" hidden>
     <div class="brand">
       <svg viewBox="0 0 24 24" class="brand-mark" aria-hidden="true">
         <path d="M4 6l5 6-5 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
         <path d="M12.5 18h7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
       </svg>
       <div>
-        <p class="step-label" data-i18n="gate.step">Step 1 of 3</p>
-        <h1 data-i18n="gate.title">The code on your screen</h1>
-        <p class="muted" data-i18n="gate.sub">Click <code>&gt;_</code> in your Mac's menu bar and read the six digits.</p>
+        <h1 data-i18n="welcome.title">Your machine, in your pocket</h1>
+        <p class="muted" data-i18n="welcome.sub">A minute to check your Mac and pair this device. After that you just talk.</p>
       </div>
     </div>
+    <button id="welcome-start" type="button" class="primary wide" data-i18n="welcome.start">Start</button>
+    <button id="welcome-skip" type="button" class="link-btn wide" data-i18n="welcome.have">I already have a code</button>
+  </section>
+
+  <!-- Step 1: is the Mac ready ---------------------------------------------->
+  <section id="step-machine" class="gate-step" hidden>
+    <p class="step-label" data-i18n="setup.step1">Step 1 of 3</p>
+    <h1 class="step-title" data-i18n="setup.title1">Checking your Mac</h1>
+    <div class="setup-progress"><i id="machine-progress" style="width: 0%"></i></div>
+    <div id="machine-tasks"></div>
+    <button id="machine-next" type="button" class="primary wide" hidden data-i18n="setup.toPair">Pair this device</button>
+    <div id="machine-wait" class="setup-wait" data-i18n="setup.waiting">Waiting for the daemon…</div>
+    <button id="machine-retry" type="button" class="ghost-btn wide" hidden data-i18n="action.retry">Try again</button>
+  </section>
+
+  <!-- Step 2: the code ------------------------------------------------------>
+  <section id="step-code" class="gate-step" hidden>
+    <p class="step-label" data-i18n="gate.step">Step 2 of 3</p>
+    <h1 class="step-title" data-i18n="gate.title">The code on your screen</h1>
+    <p class="muted" data-i18n="gate.sub">Click <code>&gt;_</code> in your Mac's menu bar and read the six digits.</p>
 
     <form id="pair-form">
       <!-- Six boxes rather than one field: it is how the code is read off a
@@ -61,6 +83,19 @@
       <input id="pair-token" type="text" spellcheck="false" placeholder="sk…" />
       <button id="pair-token-go" type="button" class="ghost-btn wide" data-i18n="gate.pair">Pair device</button>
     </details>
+  </section>
+
+  <!-- Step 3: where the work is --------------------------------------------->
+  <section id="step-project" class="gate-step" hidden>
+    <p class="step-label" data-i18n="setup.step3">Step 3 of 3</p>
+    <h1 class="step-title" data-i18n="setup.title3">Choose a project</h1>
+    <p class="muted" data-i18n="setup.sub3">New sessions start here. You can change it later, or pick another folder any time.</p>
+    <div id="project-list" class="project-list"></div>
+    <button id="project-browse" type="button" class="project-add" data-i18n="setup.browse">Another folder…</button>
+    <button id="project-go" type="button" class="primary wide" data-i18n="setup.continue">Continue</button>
+    <button id="project-skip" type="button" class="link-btn wide" data-i18n="setup.later">Decide later</button>
+  </section>
+
   </div>
 </div>
 

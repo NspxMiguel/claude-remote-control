@@ -1685,6 +1685,96 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .setup-task-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
 .setup-task-text strong { font-size: 16px; font-weight: 500; letter-spacing: -.01em; }
 .setup-task-text span { font-size: var(--t-meta); color: var(--text-faint); }
+.setup-task.pending .setup-task-text strong { color: var(--text-faint); }
+.setup-mark .running {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid var(--surface-hi);
+  border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+/* Amber, not red: nothing here is broken, something is merely not set up yet. */
+.setup-mark .snag {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+  display: grid; place-items: center;
+  animation: pop .4s var(--ease) both;
+}
+
+/* Only one step is on screen at a time; each arrives with its own rise. */
+.gate-step { display: block; animation: rise var(--d3) var(--ease) both; }
+.gate-step[hidden] { display: none; }
+.step-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 34px; font-weight: 400; line-height: 1.14; letter-spacing: -.025em;
+  text-wrap: balance;
+}
+.step-title + .muted { margin-top: var(--s4); font-size: var(--t-body); }
+
+.link-btn {
+  background: none; border: none;
+  color: var(--text-dim);
+  font-size: var(--t-ui);
+  padding: var(--s4) 0 0;
+  text-align: center;
+}
+.link-btn:hover { color: var(--text); }
+
+/* The "nothing to show yet" bar under the checklist, sweeping while it waits. */
+.setup-wait {
+  width: 100%; min-height: 56px;
+  margin-top: var(--s5);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-soft);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--t-ui); color: var(--text-faint);
+  background-image: linear-gradient(100deg, transparent 20%, var(--accent-wash) 45%, transparent 70%);
+  background-size: 220% 100%;
+  animation: sweep 1.8s linear infinite;
+}
+@keyframes sweep { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+
+/* Step 3: the folders you might mean, as cards rather than a file listing. */
+.project-list { display: grid; gap: var(--s2); margin: var(--s5) 0 var(--s2); }
+.project-row {
+  display: flex; align-items: center; gap: var(--s4);
+  width: 100%;
+  padding: var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  transition: var(--accent-transition);
+}
+.project-row.selected { border-color: var(--accent); background: var(--accent-wash); }
+.project-icon {
+  width: 38px; height: 38px; flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-faint);
+  display: grid; place-items: center;
+}
+.project-row.selected .project-icon { background: var(--accent-wash-hi); color: var(--accent); }
+.project-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.project-text strong { font-size: 16px; font-weight: 500; letter-spacing: -.01em; }
+.project-text span {
+  font-size: var(--t-meta); color: var(--text-faint);
+  font-family: var(--mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.project-check { color: var(--accent); display: flex; flex: none; animation: pop .35s var(--ease) both; }
+.project-add {
+  display: flex; align-items: center; justify-content: center; gap: var(--s3);
+  width: 100%;
+  padding: var(--s4);
+  border-radius: var(--radius);
+  border: 1px dashed var(--border);
+  background: none;
+  color: var(--accent);
+  font-size: var(--t-ui); font-weight: 500;
+}
 
 
 /* The machine picker: only ever visible with more than one Mac paired. */
