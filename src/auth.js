@@ -13,6 +13,13 @@ import { log } from './log.js';
  * someone out of *pairing* — the very thing they open the app to fix.
  */
 const MAX_PAIR_FAILURES = 10;
+/**
+ * Across every address at once. Deliberately larger than one person mistyping
+ * a six-digit code twice, and far smaller than the number of guesses it takes
+ * to find one: a code lives ten minutes, so this bounds a distributed attempt
+ * at roughly one in ten thousand per window.
+ */
+const MAX_PAIR_FAILURES_EVERYWHERE = 50;
 const MAX_AUTH_FAILURES = 60;
 const LOCKOUT_MS = 5 * 60 * 1000;
 const PAIRING_TTL_MS = 10 * 60 * 1000;
@@ -32,6 +39,25 @@ export class Auth {
     this.failures = { pair: new Map(), auth: new Map() };
     /** code -> { expiresAt } */
     this.pairingCodes = new Map();
+    /**
+     * Wrong pairing codes from anywhere at all, in the last five minutes.
+     *
+     * The per-IP lockout below assumes a guesser has one address. Put this
+     * daemon on the public internet — which is what the funnel does — and that
+     * stops being true: a million codes is not many spread over a botnet, and
+     * ten tries each from a thousand addresses never trips a per-IP limit.
+     * This one counts the guesses, not the guessers.
+     */
+    this.pairFailuresEverywhere = { count: 0, until: 0 };
+  }
+
+  /** True while a burst of wrong codes has pairing shut for everyone. */
+  isPairingShut() {
+    if (Date.now() > this.pairFailuresEverywhere.until) {
+      this.pairFailuresEverywhere = { count: 0, until: 0 };
+      return false;
+    }
+    return this.pairFailuresEverywhere.count >= MAX_PAIR_FAILURES_EVERYWHERE;
   }
 
   #limit(scope) {
@@ -50,6 +76,14 @@ export class Auth {
   }
 
   recordFailure(ip, scope = 'pair') {
+    if (scope === 'pair') {
+      if (Date.now() > this.pairFailuresEverywhere.until) this.pairFailuresEverywhere.count = 0;
+      this.pairFailuresEverywhere.count += 1;
+      this.pairFailuresEverywhere.until = Date.now() + LOCKOUT_MS;
+      if (this.pairFailuresEverywhere.count === MAX_PAIR_FAILURES_EVERYWHERE) {
+        log.warn('too many bad pairing codes from everywhere at once — pairing is shut for 5 minutes');
+      }
+    }
     const bucket = this.failures[scope] || this.failures.pair;
     const entry = bucket.get(ip) || { count: 0, until: 0 };
     entry.count += 1;

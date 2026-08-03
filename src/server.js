@@ -323,7 +323,12 @@ export class RemoteControlServer {
     } catch (err) {
       const status = err?.status || 500;
       if (status >= 500) log.error(`${req.method} ${url.pathname}:`, err?.message);
-      json(res, status, { error: err?.message || 'Internal error' });
+      // Some failures come with the exact page that fixes them. Passing the
+      // link through beats paraphrasing it into a dead end.
+      json(res, status, {
+        error: err?.message || 'Internal error',
+        ...(err?.enableUrl ? { enableUrl: err.enableUrl } : {}),
+      });
     }
   }
 
@@ -426,7 +431,9 @@ export class RemoteControlServer {
     if (route === 'pair' && method === 'POST') {
       const body = await readJsonBody(req);
       const ip = clientIp(req);
-      if (this.auth.isLockedOut(ip)) throw Object.assign(new Error('Too many attempts'), { status: 429 });
+      if (this.auth.isLockedOut(ip) || this.auth.isPairingShut()) {
+        throw Object.assign(new Error('Too many attempts'), { status: 429 });
+      }
 
       const viaToken = body.token && this.auth.verify(body.token);
       const viaCode = body.code && this.auth.consumePairingCode(String(body.code));
@@ -746,6 +753,10 @@ export class RemoteControlServer {
         // switches below it are not, since those reflect something you just
         // flipped and have to read back true.
         tasks: await this.memo('setup', 30_000, checkTasks),
+        publicUrl: await this.memo('publicUrl', 10_000, async () => {
+          const { publicState } = await import('./tailnet.js');
+          return publicState(this.config.port);
+        }),
         keepAwake: keepAwake.toJSON(),
         closedLid: await closedLid.state(),
         suggestedRoots: suggestedRoots(),
@@ -778,6 +789,21 @@ export class RemoteControlServer {
       // Running one is precisely how the checklist stops being true.
       this.forgetMachineState();
       json(res, 200, { task });
+      return;
+    }
+
+    // HTTPS in front of the daemon. Two of them: the tailnet one, which makes
+    // the microphone and notifications work; and the funnel, which means the
+    // phone needs no Tailscale at all — and that anyone with the address can
+    // knock. Never on unless asked for, and asked for separately.
+    if (route === 'setup/public-url' && method === 'PUT') {
+      const body = await readJsonBody(req);
+      const { enablePublic, disablePublic } = await import('./tailnet.js');
+      const state = body.mode === 'off'
+        ? await disablePublic(this.config.port)
+        : await enablePublic(this.config.port, { open: body.mode === 'internet' });
+      this.forgetMachineState();
+      json(res, 200, { publicUrl: state });
       return;
     }
 

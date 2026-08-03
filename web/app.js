@@ -2172,6 +2172,113 @@ function closeFolderPicker() {
 }
 
 /**
+ * How the phone gets here.
+ *
+ * Plain HTTP over the tailnet is what this app has always been, and it costs
+ * two things: the phone has to be on the tailnet, and the page is not a secure
+ * context — so the microphone, the QR camera and notifications are all refused
+ * by the browser, whatever the app does.
+ *
+ * Tailscale answers both, with two commands that differ by one word and by
+ * everything else. So they are two separate choices here, and the one that
+ * publishes this Mac to the internet says so in those words.
+ */
+async function renderReach(body) {
+  let setup;
+  try {
+    setup = await api('/api/setup');
+  } catch {
+    return; // The addresses below still tell you how to get here.
+  }
+  const reach = setup.publicUrl;
+  if (!reach?.available) return;
+
+  const section = group(
+    t('settings.reach', 'Getting here'),
+    reach.funnel
+      ? t('settings.reachOpen', 'Anyone with the address can reach this Mac. Pairing still gates it.')
+      : reach.serve
+        ? t('settings.reachTailnet', 'HTTPS on your tailnet — the phone still needs Tailscale.')
+        : t('settings.reachOff', 'Plain HTTP on your network. The microphone and notifications need HTTPS.'),
+  );
+  section.card.classList.add('boxed');
+
+  if (reach.url) {
+    const line = el('div', 's-row');
+    const text = el('div', 's-row-text');
+    text.appendChild(el('strong', 'address-url', reach.url));
+    text.appendChild(el('span', null, reach.detail));
+    line.appendChild(text);
+    line.appendChild(
+      action(t('action.copy', 'Copy'), async (button) => {
+        button.textContent = (await copyText(reach.url)) ? t('action.copied', 'Copied') : t('action.failed', 'Failed');
+      }, { neutral: true }),
+    );
+    section.card.appendChild(line);
+  }
+
+  const choose = async (mode, button) => {
+    const was = button.textContent;
+    button.disabled = true;
+    button.textContent = t('settings.reachWorking', 'Asking Tailscale…');
+    try {
+      await api('/api/setup/public-url', { method: 'PUT', body: JSON.stringify({ mode }) });
+      await openSettings();
+    } catch (err) {
+      // Tailscale hands back the exact page that turns the feature on. Passing
+      // it through beats retyping it as a sentence.
+      if (err.enableUrl) {
+        section.card.appendChild(
+          row({
+            name: err.message,
+            detail: null,
+            control: action(t('settings.reachEnable', 'Turn it on at tailscale.com'), () => {
+              window.open(err.enableUrl, '_blank', 'noopener');
+            }),
+          }),
+        );
+      } else {
+        toast(err.message);
+      }
+      button.disabled = false;
+      button.textContent = was;
+    }
+  };
+
+  section.card.appendChild(
+    row({
+      name: t('settings.reachTailnetName', 'HTTPS on my tailnet'),
+      detail: t('settings.reachTailnetWhy', 'Turns on the microphone and notifications'),
+      control: reach.serve && !reach.funnel
+        ? el('span', 'muted small', t('settings.reachOn', 'on'))
+        : action(t('action.turnOn', 'Turn on'), (b) => choose('tailnet', b)),
+    }),
+  );
+
+  section.card.appendChild(
+    row({
+      name: t('settings.reachOpenName', 'From anywhere, no Tailscale'),
+      detail: t('settings.reachOpenWhy', 'Publishes this Mac to the internet — only pairing stands in the way'),
+      control: reach.funnel
+        ? el('span', 'muted small', t('settings.reachOn', 'on'))
+        : action(t('action.turnOn', 'Turn on'), (b) => choose('internet', b)),
+    }),
+  );
+
+  if (reach.serve || reach.funnel) {
+    section.card.appendChild(
+      row({
+        name: t('settings.reachOffName', 'Back to my network only'),
+        detail: null,
+        control: action(t('action.turnOff', 'Turn off'), (b) => choose('off', b)),
+      }),
+    );
+  }
+
+  body.appendChild(section.section);
+}
+
+/**
  * The host-side setup, done from here. Everything in this section is something
  * you would otherwise have to walk to the machine and type.
  */
@@ -2502,6 +2609,8 @@ async function openSettings() {
       );
       body.appendChild(warn);
     }
+
+    await renderReach(body);
 
     // --- addresses ------------------------------------------------------------
     const ts = data.tailscale;

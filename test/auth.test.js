@@ -162,3 +162,27 @@ describe('extractToken', () => {
     assert.equal(extractToken({ headers: { authorization: 'Basic xyz' } }, null), null);
   });
 });
+
+describe('pairing on the open internet', () => {
+  test('a thousand addresses guessing once each still runs out of guesses', () => {
+    const auth = new Auth({ token: 'master', devices: [] });
+
+    // Each from its own address, so the per-IP lockout never fires — which is
+    // exactly the shape of a distributed guess against a six-digit code.
+    for (let i = 0; i < 49; i += 1) {
+      assert.equal(auth.isPairingShut(), false, `shut too early at ${i}`);
+      auth.recordFailure(`10.0.0.${i}`, 'pair');
+    }
+    auth.recordFailure('10.0.1.1', 'pair');
+    assert.equal(auth.isPairingShut(), true, 'fifty wrong codes is a guesser, not a typo');
+
+    // And a fresh address gets no free pass while it is shut.
+    assert.equal(auth.isPairingShut(), true);
+  });
+
+  test('the everywhere counter does not touch token checks', () => {
+    const auth = new Auth({ token: 'master', devices: [] });
+    for (let i = 0; i < 60; i += 1) auth.recordFailure(`10.0.2.${i}`, 'auth');
+    assert.equal(auth.isPairingShut(), false, 'bad tokens are a different question');
+  });
+});
