@@ -582,7 +582,7 @@ export class RemoteControlServer {
     if (imageMatch && method === 'GET') {
       const picture = this.mirrors.get(decodeURIComponent(imageMatch[1]))?.images.get(imageMatch[2]);
       if (!picture) throw Object.assign(new Error('No such image'), { status: 404 });
-      const bytes = Buffer.from(picture.base64, 'base64');
+      const bytes = picture.bytes;
       res.writeHead(200, {
         'content-type': picture.mediaType,
         'content-length': bytes.length,

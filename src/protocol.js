@@ -8,8 +8,19 @@
 let counter = 0;
 const nextId = () => `i${(++counter).toString(36)}${Date.now().toString(36).slice(-4)}`;
 
-/** How long streaming text is allowed to accumulate before a patch goes out. */
-const FLUSH_INTERVAL_MS = 60;
+/**
+ * How long streaming text accumulates before a patch goes out.
+ *
+ * A patch carries the whole item, so the cost of one is proportional to how
+ * much has been said — meaning a fixed interval still spends quadratic bytes
+ * on a long answer. The wait grows with the text instead: the first sentences
+ * appear as fast as they are typed, and a screenful redraws a few times a
+ * second rather than thirty.
+ */
+const FLUSH_MIN_MS = 60;
+const FLUSH_MAX_MS = 400;
+const flushDelay = (length) =>
+  Math.min(FLUSH_MAX_MS, Math.max(FLUSH_MIN_MS, Math.round(length / 50)));
 
 /** Compact one-line labels for tool calls, so a phone screen stays readable. */
 export function summarizeTool(name, input = {}) {
@@ -262,7 +273,7 @@ export class Feed {
     item.seq = ++this.seq;
     this.pending.add(item);
     if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => this.flush(), FLUSH_INTERVAL_MS);
+    this.flushTimer = setTimeout(() => this.flush(), flushDelay(item.text?.length || 0));
     this.flushTimer.unref?.();
   }
 

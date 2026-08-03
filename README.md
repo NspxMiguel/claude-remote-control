@@ -29,7 +29,7 @@ commands, and ask your permission before it does.
 | **Chat, properly** | Real streaming output with the same `CLAUDE.md`, settings, MCP servers and skills your desktop uses. Not a wrapper around a chat API — it is your Claude Code, on your machine, with your files. |
 | **Reads like the desktop app** | A run of tool calls collapses into one row — *Edited 3 files, ran grep -n  +24 −3* — that expands into the individual calls, each with its command, diff and output. The diffstat comes from the agent's own patch data, so it is exact. |
 | **Approval from the couch** | When the agent wants to run something, the request lands on your phone with a chime. Allow once, always allow, or deny. An unanswered prompt is denied after ten minutes rather than hanging forever. |
-| **Your desktop sessions, mirrored** | Conversations you started in Claude Desktop or the `claude` CLI show up read-only and update live, because both write the same JSONL transcripts. **Take over** forks one into a session you drive from the phone, leaving the original intact. |
+| **Your desktop sessions, on your phone** | Conversations you started in Claude Desktop or the `claude` CLI show up and update live, because both write the same JSONL transcripts. Type into one and this Mac carries it on — same conversation, same transcript, so it is still there when you reopen it on the Mac. |
 | **Photos and screenshots** | Attach from the camera or gallery, or paste one on desktop. Images are downscaled in the browser before upload, so a 12 MB photo crosses the network as a couple hundred KB. An agent with no native image support gets the file written beside the project and named in the prompt, so attaching works everywhere. |
 | **Sign an agent in from the phone** | Settings lists every agent, whether it is ready, and the exact command that signs it in. If you cannot reach a terminal, paste an API key instead — it is stored mode-600 next to the master token and exported to that agent only. It never comes back out over the API. |
 | **More than one agent** | Claude Code is the one this is built around. Antigravity works through its headless stream. The UI adapts to what each one can actually do. |
@@ -356,7 +356,7 @@ web/                          # the PWA: no framework, no build step
 |---|---|
 | **Notifications need HTTPS** | Over plain HTTP you get a chime and a tab badge. See `tailscale serve` above. There is no push server by design — that would mean routing your data through someone else's infrastructure. |
 | **Interactive prompts inside a tool** | A shell command that stops to ask a question is not forwarded; it will hang until it times out. |
-| **Mirrored sessions are read-only** | Writing into a transcript another process owns would corrupt it, so taking over forks instead. |
+| **One driver at a time** | Nothing can type into a Claude window that is already open — no SDK call attaches to a running process. Taking over resumes the transcript from here instead, which is genuinely the same conversation. Driving it from both at once would branch it. |
 | **Restarting the daemon ends live sessions** | They live in memory. The conversation is safe — it reappears under *On this machine*, and **Take over** picks it back up. |
 | **Antigravity is the one exercised end to end** | Driven against the real `agy` binary — a session, a file written into the folder you picked, a photo read back. Claude Code is covered by a fixture that speaks the SDK's control protocol. |
 

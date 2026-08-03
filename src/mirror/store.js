@@ -10,12 +10,20 @@ import { applyTranscriptLine, foldToolResult, isRealModel, parseLines } from './
 
 const PROJECTS_DIR =
   process.env.CRC_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects');
-/** Cap how much history we replay for a huge transcript. */
-const MAX_REPLAY_BYTES = 8 * 1024 * 1024;
+/**
+ * Cap how much history we replay for a huge transcript.
+ *
+ * Was 8MB, which on a 100MB transcript parsed eight megabytes of JSON to fill
+ * a feed that holds 2000 items and got 141 of them. Almost all of that work
+ * was thrown away immediately, and the garbage it made never came back off
+ * the daemon's footprint. Halved: still deep enough history to be worth
+ * scrolling, at half the cost of getting there.
+ */
+const MAX_REPLAY_BYTES = 4 * 1024 * 1024;
 /** Read the replay in slices this size, never as one allocation. */
 const REPLAY_CHUNK_BYTES = 256 * 1024;
-/** How many read images one mirror holds on to. */
-const MAX_KEPT_IMAGES = 40;
+/** How many read images one mirror holds on to. A screenshot is ~300KB. */
+const MAX_KEPT_IMAGES = 12;
 const POLL_INTERVAL_MS = 400;
 
 /**
@@ -247,7 +255,12 @@ class MirrorSession extends EventEmitter {
    * pin every one of them in memory for as long as the mirror is open.
    */
   keepImage(toolUseId, picture) {
-    this.images.set(toolUseId, picture);
+    // As bytes, not base64: a third smaller, and it is what the response
+    // needs anyway.
+    this.images.set(toolUseId, {
+      mediaType: picture.mediaType,
+      bytes: Buffer.from(picture.base64, 'base64'),
+    });
     while (this.images.size > MAX_KEPT_IMAGES) {
       this.images.delete(this.images.keys().next().value);
     }
