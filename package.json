@@ -1,6 +1,6 @@
 {
   "name": "claude-remote-control",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Control Claude Code and Claude Desktop from your phone \u2014 a PWA chat client for your own machine, over LAN or Tailscale.",
   "type": "module",
   "license": "MIT",
