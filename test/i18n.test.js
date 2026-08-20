@@ -18,12 +18,19 @@ globalThis.localStorage = {
   removeItem: (k) => store.delete(k),
 };
 globalThis.document = { documentElement: {}, querySelectorAll: () => [] };
+// `navigator` só existe como global do Node a partir da versão 21, e o `engines`
+// deste pacote aceita a 20. Sem ele, `web/i18n.js` estoura um ReferenceError já na
+// importação — resolveLanguage roda na inicialização do módulo —, e o arquivo de
+// teste inteiro quebrava só nos runners de Node 20. Declarar o navegador aqui, como
+// já se faz com localStorage e document, também torna o teste determinístico: a
+// asserção passa a depender do que este arquivo diz, não do que o Node do dia expõe.
+globalThis.navigator = { language: 'en-US' };
 
 const { LANGUAGES, resolveLanguage, setLanguage, t } = await import('../web/i18n.js');
 
 describe('choosing a language', () => {
   test('automatic follows the phone, explicit choices do not', () => {
-    // navigator is Node's own here, reporting en-US.
+    // navigator is stubbed at the top of this file, reporting en-US.
     assert.equal(resolveLanguage('auto'), 'en');
     assert.equal(resolveLanguage('pt'), 'pt');
     assert.equal(resolveLanguage('en'), 'en');
