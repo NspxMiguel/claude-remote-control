@@ -18,13 +18,19 @@ globalThis.localStorage = {
   removeItem: (k) => store.delete(k),
 };
 globalThis.document = { documentElement: {}, querySelectorAll: () => [] };
-// `navigator` só existe como global do Node a partir da versão 21, e o `engines`
-// deste pacote aceita a 20. Sem ele, `web/i18n.js` estoura um ReferenceError já na
-// importação — resolveLanguage roda na inicialização do módulo —, e o arquivo de
-// teste inteiro quebrava só nos runners de Node 20. Declarar o navegador aqui, como
-// já se faz com localStorage e document, também torna o teste determinístico: a
-// asserção passa a depender do que este arquivo diz, não do que o Node do dia expõe.
-globalThis.navigator = { language: 'en-US' };
+// O navegador entra aqui junto de localStorage e document, e por dois motivos: sem
+// ele o teste quebra, e com ele a asserção passa a depender do que este arquivo diz
+// em vez do que o Node do dia expõe.
+// `defineProperty` e não atribuição: a partir da 21 o Node define `navigator` como
+// getter no global, e `globalThis.navigator = ...` estoura um TypeError em módulo
+// (que é sempre estrito). Antes da 21 o global não existe, e aí `web/i18n.js` estoura
+// um ReferenceError já na importação, porque resolveLanguage roda na inicialização do
+// módulo. `defineProperty` atende os dois casos.
+Object.defineProperty(globalThis, 'navigator', {
+  value: { language: 'en-US' },
+  configurable: true,
+  writable: true,
+});
 
 const { LANGUAGES, resolveLanguage, setLanguage, t } = await import('../web/i18n.js');
 
